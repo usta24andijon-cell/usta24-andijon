@@ -471,14 +471,4 @@ async def main():
         await bot.delete_webhook(drop_pending_updates=True)
         runner = await start_web_server(bot)
         logger.info("🤖 USTA 24 ANDIJON bot ishga tushdi.")
-        await dp.start_polling(bot)
-    finally:
-        if runner:
-            await runner.cleanup()
-        await bot.session.close()
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Bot to'xtatildi.")
+        await dp.start_po
