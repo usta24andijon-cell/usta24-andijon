@@ -1,7 +1,9 @@
+
 import asyncio
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 
 import aiosqlite
 from aiogram import Bot, Dispatcher, F
@@ -15,43 +17,61 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
 
+# -------------------- SOZLAMALAR --------------------
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_IDS = {
-    int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",")
-    if x.strip().isdigit()
+    int(value.strip())
+    for value in os.getenv("ADMIN_IDS", "").split(",")
+    if value.strip().isdigit()
 }
 DB_PATH = os.getenv("DB_PATH", "usta24.db")
 CARD_NUMBER = os.getenv("CARD_NUMBER", "").strip()
 CARD_HOLDER = os.getenv("CARD_HOLDER", "USTA 24 ANDIJON").strip()
 
 if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN topilmadi. .env yoki Render Environment Variables ni tekshiring.")
+    raise RuntimeError(
+        "BOT_TOKEN topilmadi. .env fayliga BOT_TOKEN=... қаторини киритинг."
+    )
 
-logging.basicConfig(level=logging.INFO)
-bot = Bot(BOT_TOKEN)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
+logger = logging.getLogger("usta24")
+
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 CATEGORIES = [
-    "⚡ Электрик", "🚿 Сантехник", "❄️ Кондиционер устаси",
-    "🧱 Қурилиш ва таъмирлаш", "🪑 Мебель устаси",
-    "🧺 Маиший техника таъмири", "🎨 Бўёқчи ва пардозчи",
-    "🔐 Қулф ва эшик устаси", "🚗 Автоэлектрик", "🔧 Бошқа хизматлар"
+    "⚡ Электрик",
+    "🚿 Сантехник",
+    "❄️ Кондиционер устаси",
+    "🧱 Қурилиш ва таъмирлаш",
+    "🪑 Мебель устаси",
+    "🧺 Маиший техника таъмири",
+    "🎨 Бўёқчи ва пардозчи",
+    "🔐 Қулф ва эшик устаси",
+    "🚗 Автоэлектрик",
+    "🔧 Бошқа хизматлар",
 ]
 
-class Register(StatesGroup):
+
+# -------------------- FSM ҲОЛАТЛАРИ --------------------
+class Registration(StatesGroup):
     name = State()
     phone = State()
     district = State()
     role = State()
 
-class MasterApply(StatesGroup):
+
+class MasterApplication(StatesGroup):
     category = State()
     experience = State()
     about = State()
-    district = State()
 
-class NewOrder(StatesGroup):
+
+class OrderForm(StatesGroup):
     category = State()
     description = State()
     address = State()
@@ -60,18 +80,26 @@ class NewOrder(StatesGroup):
     payment = State()
     receipt = State()
 
-class Broadcast(StatesGroup):
-    text = State()
 
-class HelpMessage(StatesGroup):
-    text = State()
+class SupportForm(StatesGroup):
+    message = State()
 
-def main_menu(role="client", is_admin=False):
+
+class ReviewForm(StatesGroup):
+    comment = State()
+
+
+class BroadcastForm(StatesGroup):
+    message = State()
+
+
+# -------------------- КЛАВИАТУРАЛАР --------------------
+def main_menu(role: str = "client", is_admin: bool = False):
     rows = [
         [KeyboardButton(text="🔍 Уста топиш"), KeyboardButton(text="📝 Буюртма бериш")],
         [KeyboardButton(text="👨‍🔧 Уста бўлиш"), KeyboardButton(text="📋 Буюртмаларим")],
-        [KeyboardButton(text="👤 Шахсий кабинет"), KeyboardButton(text="⭐ Баҳолар ва фикрлар")],
-        [KeyboardButton(text="❤️ Севимли усталар"), KeyboardButton(text="☎️ Ёрдам маркази")]
+        [KeyboardButton(text="👤 Шахсий кабинет"), KeyboardButton(text="⭐ Баҳолар")],
+        [KeyboardButton(text="❤️ Севимли усталар"), KeyboardButton(text="☎️ Ёрдам")],
     ]
     if role == "master":
         rows.insert(1, [KeyboardButton(text="📥 Усталар учун буюртмалар")])
@@ -79,770 +107,976 @@ def main_menu(role="client", is_admin=False):
         rows.append([KeyboardButton(text="⚙️ Админ панели")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
-def category_keyboard(prefix="cat"):
-    b = InlineKeyboardBuilder()
-    for i, name in enumerate(CATEGORIES):
-        b.button(text=name, callback_data=f"{prefix}:{i}")
-    b.adjust(2)
-    return b.as_markup()
 
-def admin_keyboard():
+def categories_markup(prefix: str):
+    builder = InlineKeyboardBuilder()
+    for index, category in enumerate(CATEGORIES):
+        builder.button(text=category, callback_data=f"{prefix}:{index}")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def admin_markup():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="adm:stats")],
-        [InlineKeyboardButton(text="👨‍🔧 Усталарни тасдиқлаш", callback_data="adm:masters")],
-        [InlineKeyboardButton(text="📋 Очиқ буюртмалар", callback_data="adm:orders")],
-        [InlineKeyboardButton(text="📢 Оммавий хабар", callback_data="adm:broadcast")],
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
+        [InlineKeyboardButton(text="👨‍🔧 Усталарни тасдиқлаш", callback_data="admin:masters")],
+        [InlineKeyboardButton(text="💳 Тўловларни текшириш", callback_data="admin:payments")],
+        [InlineKeyboardButton(text="📋 Барча буюртмалар", callback_data="admin:orders")],
+        [InlineKeyboardButton(text="📢 Хабар юбориш", callback_data="admin:broadcast")],
     ])
 
-async def init_db():
+
+def payment_markup():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💵 Нақд пул", callback_data="pay:cash")],
+        [InlineKeyboardButton(text="💳 Карта орқали", callback_data="pay:card")],
+    ])
+
+
+# -------------------- БАЗА --------------------
+async def db_execute(query: str, params: tuple = ()):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""CREATE TABLE IF NOT EXISTS users(
-            tg_id INTEGER PRIMARY KEY, name TEXT, phone TEXT, district TEXT,
-            role TEXT DEFAULT 'client', created_at TEXT)""")
-        await db.execute("""CREATE TABLE IF NOT EXISTS masters(
-            tg_id INTEGER PRIMARY KEY, category TEXT, experience TEXT, about TEXT,
-            district TEXT, approved INTEGER DEFAULT 0, rating REAL DEFAULT 0,
-            reviews INTEGER DEFAULT 0)""")
-        await db.execute("""CREATE TABLE IF NOT EXISTS orders(
-            id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INTEGER, category TEXT,
-            description TEXT, address TEXT, phone TEXT, photo_id TEXT,
-            status TEXT DEFAULT 'new', master_id INTEGER, created_at TEXT,
-            payment_method TEXT DEFAULT 'cash',
-            payment_status TEXT DEFAULT 'unpaid',
-            receipt_file_id TEXT)""")
-        # Eski bazalar uchun xavfsiz migratsiya: yangi ustunlar bo'lmasa qo'shiladi.
-        cur = await db.execute("PRAGMA table_info(orders)")
-        existing_columns = {row[1] for row in await cur.fetchall()}
-        for column, definition in [
-            ("payment_method", "TEXT DEFAULT 'cash'"),
-            ("payment_status", "TEXT DEFAULT 'unpaid'"),
-            ("receipt_file_id", "TEXT"),
-        ]:
-            if column not in existing_columns:
-                await db.execute(f"ALTER TABLE orders ADD COLUMN {column} {definition}")
-        await db.execute("""CREATE TABLE IF NOT EXISTS reviews(
-            id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER, client_id INTEGER,
-            master_id INTEGER, rating INTEGER, comment TEXT, created_at TEXT)""")
-        await db.execute("""CREATE TABLE IF NOT EXISTS favorites(
-            client_id INTEGER, master_id INTEGER, UNIQUE(client_id, master_id))""")
+        await db.execute(query, params)
         await db.commit()
 
-async def get_user(tg_id):
+
+async def db_fetchone(query: str, params: tuple = ()):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cur = await db.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,))
-        return await cur.fetchone()
+        cursor = await db.execute(query, params)
+        return await cursor.fetchone()
 
-async def save_user(tg_id, name, phone, district, role):
+
+async def db_fetchall(query: str, params: tuple = ()):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""INSERT INTO users(tg_id,name,phone,district,role,created_at)
-        VALUES(?,?,?,?,?,?) ON CONFLICT(tg_id) DO UPDATE SET
-        name=excluded.name, phone=excluded.phone, district=excluded.district,
-        role=excluded.role""",
-        (tg_id, name, phone, district, role, datetime.now().isoformat(timespec="seconds")))
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(query, params)
+        return await cursor.fetchall()
+
+
+async def init_db():
+    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                tg_id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                district TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'client',
+                created_at TEXT NOT NULL
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS masters (
+                tg_id INTEGER PRIMARY KEY,
+                category TEXT NOT NULL,
+                experience TEXT NOT NULL,
+                about TEXT NOT NULL,
+                district TEXT NOT NULL,
+                approved INTEGER NOT NULL DEFAULT 0,
+                rating REAL NOT NULL DEFAULT 0,
+                reviews INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                description TEXT NOT NULL,
+                address TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                photo_id TEXT,
+                status TEXT NOT NULL DEFAULT 'new',
+                master_id INTEGER,
+                payment_method TEXT NOT NULL DEFAULT 'cash',
+                payment_status TEXT NOT NULL DEFAULT 'unpaid',
+                receipt_file_id TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS reviews (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL UNIQUE,
+                client_id INTEGER NOT NULL,
+                master_id INTEGER NOT NULL,
+                rating INTEGER NOT NULL,
+                comment TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS favorites (
+                client_id INTEGER NOT NULL,
+                master_id INTEGER NOT NULL,
+                UNIQUE(client_id, master_id)
+            )
+        """)
+        # Аввалги версиялардан қолган база учун миграция.
+        cursor = await db.execute("PRAGMA table_info(orders)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        migrations = {
+            "payment_method": "TEXT NOT NULL DEFAULT 'cash'",
+            "payment_status": "TEXT NOT NULL DEFAULT 'unpaid'",
+            "receipt_file_id": "TEXT",
+            "created_at": "TEXT",
+        }
+        for column, definition in migrations.items():
+            if column not in columns:
+                await db.execute(f"ALTER TABLE orders ADD COLUMN {column} {definition}")
         await db.commit()
 
-async def user_is_admin(tg_id):
-    return tg_id in ADMIN_IDS
 
-async def notify_admins(text, reply_markup=None):
+async def get_user(user_id: int):
+    return await db_fetchone("SELECT * FROM users WHERE tg_id=?", (user_id,))
+
+
+async def is_admin(user_id: int) -> bool:
+    return user_id in ADMIN_IDS
+
+
+async def send_admins(text: str, markup=None):
     for admin_id in ADMIN_IDS:
         try:
-            await bot.send_message(admin_id, text, reply_markup=reply_markup)
+            await bot.send_message(admin_id, text, reply_markup=markup)
         except Exception:
-            logging.exception("Admin notification failed: %s", admin_id)
+            logger.exception("Администраторга хабар юборилмади: %s", admin_id)
 
+
+async def user_menu(message: Message, user_id: int):
+    user = await get_user(user_id)
+    if not user:
+        return
+    await message.answer(
+        f"Ассалому алайкум, {user['name']}!\nUSTA 24 ANDIJON хизматига хуш келибсиз.",
+        reply_markup=main_menu(user["role"], await is_admin(user_id))
+    )
+
+
+async def send_order_to_masters(order_id: int):
+    order = await db_fetchone("SELECT * FROM orders WHERE id=?", (order_id,))
+    if not order:
+        return
+    masters = await db_fetchall(
+        """SELECT m.tg_id, u.name, u.phone
+           FROM masters m JOIN users u ON u.tg_id=m.tg_id
+           WHERE m.approved=1 AND m.category=?""",
+        (order["category"],)
+    )
+    text = (
+        f"🆕 <b>Янги буюртма №{order_id}</b>\n"
+        f"Хизмат: {order['category']}\n"
+        f"Тавсиф: {order['description']}\n"
+        f"Манзил: {order['address']}\n"
+        f"Телефон: {order['phone']}"
+    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Буюртмани қабул қилиш", callback_data=f"take:{order_id}")
+    ]])
+    for master in masters:
+        try:
+            await bot.send_message(master["tg_id"], text, parse_mode="HTML", reply_markup=markup)
+        except Exception:
+            logger.exception("Устага буюртма юборилмади: %s", master["tg_id"])
+
+
+# -------------------- РЎЙХАТДАН ЎТИШ --------------------
 @dp.message(CommandStart())
 async def start(message: Message, state: FSMContext):
     await state.clear()
     user = await get_user(message.from_user.id)
-    if not user:
-        await message.answer(
-            "🔧 <b>USTA 24 ANDIJON</b>\n\nХуш келибсиз! Рўйхатдан ўтиш учун исм-фамилиянгизни ёзинг.",
-            parse_mode="HTML"
-        )
-        await state.set_state(Register.name)
+    if user:
+        await user_menu(message, message.from_user.id)
         return
     await message.answer(
-        f"Ассалому алайкум, {user['name']}!\nUSTA 24 ANDIJON хизматларига хуш келибсиз.",
-        reply_markup=main_menu(user["role"], await user_is_admin(message.from_user.id))
+        "🔧 <b>USTA 24 ANDIJON</b>\n\nРўйхатдан ўтиш учун исм-фамилиянгизни ёзинг.",
+        parse_mode="HTML"
     )
+    await state.set_state(Registration.name)
 
-@dp.message(Register.name)
-async def reg_name(message: Message, state: FSMContext):
+
+@dp.message(Registration.name)
+async def registration_name(message: Message, state: FSMContext):
     name = (message.text or "").strip()
     if len(name) < 2:
-        await message.answer("Илтимос, исмингизни тўғри киритинг.")
+        await message.answer("Исмни камида 2 та ҳарф билан киритинг.")
         return
     await state.update_data(name=name)
-    kb = ReplyKeyboardMarkup(
+    keyboard = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📱 Телефон рақамни юбориш", request_contact=True)]],
-        resize_keyboard=True, one_time_keyboard=True
+        resize_keyboard=True,
+        one_time_keyboard=True
     )
-    await message.answer("Телефон рақамингизни юборинг ёки +998901234567 шаклида ёзинг.", reply_markup=kb)
-    await state.set_state(Register.phone)
+    await message.answer("Телефон рақамингизни юборинг ёки қўлда ёзинг.", reply_markup=keyboard)
+    await state.set_state(Registration.phone)
 
-@dp.message(Register.phone)
-async def reg_phone(message: Message, state: FSMContext):
+
+@dp.message(Registration.phone)
+async def registration_phone(message: Message, state: FSMContext):
     phone = message.contact.phone_number if message.contact else (message.text or "").strip()
     if len(phone) < 7:
         await message.answer("Телефон рақам нотўғри. Қайта киритинг.")
         return
     await state.update_data(phone=phone)
-    await message.answer("Қайси туман/шаҳарда яшайсиз? Масалан: Андижон шаҳри.")
-    await state.set_state(Register.district)
+    await message.answer("Қайси туман ёки шаҳарда яшайсиз?")
+    await state.set_state(Registration.district)
 
-@dp.message(Register.district)
-async def reg_district(message: Message, state: FSMContext):
-    await state.update_data(district=(message.text or "").strip())
-    kb = InlineKeyboardMarkup(inline_keyboard=[
+
+@dp.message(Registration.district)
+async def registration_district(message: Message, state: FSMContext):
+    district = (message.text or "").strip()
+    if len(district) < 2:
+        await message.answer("Туман ёки шаҳар номини киритинг.")
+        return
+    await state.update_data(district=district)
+    markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👤 Мижозман", callback_data="role:client")],
-        [InlineKeyboardButton(text="👨‍🔧 Устаман", callback_data="role:master")]
+        [InlineKeyboardButton(text="👨‍🔧 Устаман", callback_data="role:master")],
     ])
-    await message.answer("Сиз кимсиз?", reply_markup=kb)
-    await state.set_state(Register.role)
+    await message.answer("Сиз кимсиз?", reply_markup=markup)
+    await state.set_state(Registration.role)
 
-@dp.callback_query(Register.role, F.data.startswith("role:"))
-async def reg_role(call: CallbackQuery, state: FSMContext):
-    role = call.data.split(":")[1]
+
+@dp.callback_query(Registration.role, F.data.startswith("role:"))
+async def registration_role(call: CallbackQuery, state: FSMContext):
+    role = call.data.split(":", 1)[1]
+    if role not in {"client", "master"}:
+        await call.answer("Нотўғри танлов.", show_alert=True)
+        return
     data = await state.get_data()
-    await save_user(call.from_user.id, data["name"], data["phone"], data["district"], role)
+    now = datetime.now().isoformat(timespec="seconds")
+    await db_execute(
+        """INSERT INTO users(tg_id,name,phone,district,role,created_at)
+           VALUES(?,?,?,?,?,?)
+           ON CONFLICT(tg_id) DO UPDATE SET
+           name=excluded.name, phone=excluded.phone,
+           district=excluded.district, role=excluded.role""",
+        (call.from_user.id, data["name"], data["phone"], data["district"], role, now)
+    )
     await state.clear()
-    await call.message.answer("✅ Рўйхатдан ўтиш якунланди!",
-        reply_markup=main_menu(role, await user_is_admin(call.from_user.id)))
-    await call.answer()
+    await call.message.answer(
+        "✅ Рўйхатдан ўтиш якунланди.",
+        reply_markup=main_menu(role, await is_admin(call.from_user.id))
+    )
     if role == "master":
-        await call.message.answer("Уста профилингизни тўлдириш учун «👨‍🔧 Уста бўлиш» тугмасини босинг.")
+        await call.message.answer("Уста профилини тўлдириш учун «👨‍🔧 Уста бўлиш» тугмасини босинг.")
+    await call.answer()
 
+
+# -------------------- УСТА БЎЛИШ ВА ҚИДИРИШ --------------------
 @dp.message(F.text == "👨‍🔧 Уста бўлиш")
-async def master_apply_start(message: Message, state: FSMContext):
+async def master_apply(message: Message, state: FSMContext):
     user = await get_user(message.from_user.id)
     if not user:
         await message.answer("Аввал /start орқали рўйхатдан ўтинг.")
         return
-    await message.answer("Қайси хизмат тури бўйича ишлайсиз?", reply_markup=category_keyboard("apply"))
-    await state.set_state(MasterApply.category)
+    await message.answer("Қайси хизмат тури бўйича ишлайсиз?", reply_markup=categories_markup("apply"))
+    await state.set_state(MasterApplication.category)
 
-@dp.callback_query(MasterApply.category, F.data.startswith("apply:"))
+
+@dp.callback_query(MasterApplication.category, F.data.startswith("apply:"))
 async def master_category(call: CallbackQuery, state: FSMContext):
-    idx = int(call.data.split(":")[1])
-    if not 0 <= idx < len(CATEGORIES):
-        await call.answer("Нотўғри хизмат тури.", show_alert=True)
+    try:
+        index = int(call.data.split(":")[1])
+        category = CATEGORIES[index]
+    except (ValueError, IndexError):
+        await call.answer("Хизмат тури нотўғри.", show_alert=True)
         return
-    await state.update_data(category=CATEGORIES[idx])
+    await state.update_data(category=category)
     await call.message.answer("Иш тажрибангиз қанча? Масалан: 3 йил.")
-    await state.set_state(MasterApply.experience)
+    await state.set_state(MasterApplication.experience)
     await call.answer()
 
-@dp.message(MasterApply.experience)
+
+@dp.message(MasterApplication.experience)
 async def master_experience(message: Message, state: FSMContext):
-    await state.update_data(experience=(message.text or "").strip())
+    experience = (message.text or "").strip()
+    if not experience:
+        await message.answer("Иш тажрибангизни ёзинг.")
+        return
+    await state.update_data(experience=experience)
     await message.answer("Ўзингиз ва хизматингиз ҳақида қисқача маълумот ёзинг.")
-    await state.set_state(MasterApply.about)
+    await state.set_state(MasterApplication.about)
 
-@dp.message(MasterApply.about)
+
+@dp.message(MasterApplication.about)
 async def master_about(message: Message, state: FSMContext):
-    await state.update_data(about=(message.text or "").strip())
-    await message.answer("Қайси туманларда хизмат кўрсатасиз?")
-    await state.set_state(MasterApply.district)
-
-@dp.message(MasterApply.district)
-async def master_district(message: Message, state: FSMContext):
+    about = (message.text or "").strip()
+    if len(about) < 5:
+        await message.answer("Камида 5 та белги билан маълумот ёзинг.")
+        return
     data = await state.get_data()
-    district = (message.text or "").strip()
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""INSERT INTO masters(tg_id,category,experience,about,district,approved)
-        VALUES(?,?,?,?,?,0) ON CONFLICT(tg_id) DO UPDATE SET
-        category=excluded.category, experience=excluded.experience,
-        about=excluded.about, district=excluded.district, approved=0""",
-        (message.from_user.id, data["category"], data["experience"], data["about"], district))
-        await db.execute("UPDATE users SET role='master' WHERE tg_id=?", (message.from_user.id,))
-        await db.commit()
+    user = await get_user(message.from_user.id)
+    await db_execute(
+        """INSERT INTO masters(tg_id,category,experience,about,district,approved)
+           VALUES(?,?,?,?,?,0)
+           ON CONFLICT(tg_id) DO UPDATE SET
+           category=excluded.category, experience=excluded.experience,
+           about=excluded.about, district=excluded.district, approved=0""",
+        (message.from_user.id, data["category"], data["experience"], about, user["district"])
+    )
     await state.clear()
-    await message.answer("✅ Аризангиз администраторга юборилди. Текширувдан кейин хабар берамиз.",
-        reply_markup=main_menu("master", await user_is_admin(message.from_user.id)))
-    await notify_admins(
-        f"🆕 <b>Янги уста аризаси</b>\nID: <code>{message.from_user.id}</code>\n"
+    await message.answer("✅ Аризангиз администраторга юборилди. Тасдиқлангач хабар берамиз.",
+                         reply_markup=main_menu("master", await is_admin(message.from_user.id)))
+    await send_admins(
+        f"👨‍🔧 <b>Янги уста аризаси</b>\n"
+        f"Исм: {user['name']}\nТелефон: {user['phone']}\n"
         f"Йўналиш: {data['category']}\nТажриба: {data['experience']}\n"
-        f"Маълумот: {data['about']}\nҲудуд: {district}",
+        f"Ҳудуд: {user['district']}\nМаълумот: {about}",
         InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="✅ Тасдиқлаш", callback_data=f"approve:{message.from_user.id}"),
-            InlineKeyboardButton(text="❌ Рад этиш", callback_data=f"reject:{message.from_user.id}")
+            InlineKeyboardButton(text="✅ Тасдиқлаш", callback_data=f"approve_master:{message.from_user.id}"),
+            InlineKeyboardButton(text="❌ Рад этиш", callback_data=f"reject_master:{message.from_user.id}")
         ]])
     )
 
-@dp.callback_query(F.data.startswith("approve:"))
-async def approve_master(call: CallbackQuery):
-    if not await user_is_admin(call.from_user.id):
-        await call.answer("Рухсат йўқ.", show_alert=True); return
-    mid = int(call.data.split(":")[1])
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE masters SET approved=1 WHERE tg_id=?", (mid,))
-        await db.commit()
-    await bot.send_message(mid, "🎉 Уста профилингиз тасдиқланди! Энди янги буюртмаларни кўришингиз мумкин.")
-    await call.message.edit_reply_markup(reply_markup=None)
-    await call.answer("Уста тасдиқланди.")
 
-@dp.callback_query(F.data.startswith("reject:"))
-async def reject_master(call: CallbackQuery):
-    if not await user_is_admin(call.from_user.id):
-        await call.answer("Рухсат йўқ.", show_alert=True); return
-    mid = int(call.data.split(":")[1])
-    await bot.send_message(mid, "Аризангиз ҳозирча тасдиқланмади. Маълумотни тўлдириб қайта мурожаат қилинг.")
-    await call.message.edit_reply_markup(reply_markup=None)
-    await call.answer("Ариза рад этилди.")
+@dp.message(F.text == "🔍 Уста топиш")
+async def find_master(message: Message):
+    await message.answer("Қайси хизмат керак?", reply_markup=categories_markup("find"))
 
+
+@dp.callback_query(F.data.startswith("find:"))
+async def show_masters(call: CallbackQuery):
+    try:
+        category = CATEGORIES[int(call.data.split(":")[1])]
+    except (ValueError, IndexError):
+        await call.answer("Нотўғри хизмат тури.", show_alert=True)
+        return
+    masters = await db_fetchall(
+        """SELECT m.*, u.name, u.phone, u.district FROM masters m
+           JOIN users u ON u.tg_id=m.tg_id
+           WHERE m.approved=1 AND m.category=? ORDER BY m.rating DESC""",
+        (category,)
+    )
+    if not masters:
+        await call.message.answer("Ҳозирча бу йўналишда тасдиқланган уста топилмади.")
+    for master in masters:
+        text = (
+            f"👨‍🔧 <b>{master['name']}</b>\n"
+            f"Йўналиш: {master['category']}\nТажриба: {master['experience']}\n"
+            f"Ҳудуд: {master['district']}\nРейтинг: {master['rating']:.1f} "
+            f"({master['reviews']} та баҳо)\n"
+            f"Маълумот: {master['about']}\nТелефон: {master['phone']}"
+        )
+        markup = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="❤️ Севимлига қўшиш", callback_data=f"fav_add:{master['tg_id']}")
+        ]])
+        await call.message.answer(text, parse_mode="HTML", reply_markup=markup)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("fav_add:"))
+async def favorite_add(call: CallbackQuery):
+    try:
+        master_id = int(call.data.split(":")[1])
+    except ValueError:
+        await call.answer("Хато маълумот.", show_alert=True)
+        return
+    await db_execute(
+        "INSERT OR IGNORE INTO favorites(client_id,master_id) VALUES(?,?)",
+        (call.from_user.id, master_id)
+    )
+    await call.answer("Севимли усталарга қўшилди.")
+
+
+@dp.message(F.text == "❤️ Севимли усталар")
+async def favorites_list(message: Message):
+    rows = await db_fetchall(
+        """SELECT m.*,u.name,u.phone,u.district FROM favorites f
+           JOIN masters m ON m.tg_id=f.master_id
+           JOIN users u ON u.tg_id=m.tg_id WHERE f.client_id=?""",
+        (message.from_user.id,)
+    )
+    if not rows:
+        await message.answer("Севимли усталар рўйхати ҳозирча бўш.")
+        return
+    for row in rows:
+        await message.answer(
+            f"👨‍🔧 {row['name']}\n{row['category']}\nТелефон: {row['phone']}\n"
+            f"Рейтинг: {row['rating']:.1f}"
+        )
+
+
+# -------------------- БУЮРТМА БЕРИШ --------------------
 @dp.message(F.text == "📝 Буюртма бериш")
 async def order_start(message: Message, state: FSMContext):
     if not await get_user(message.from_user.id):
-        await message.answer("Аввал /start орқали рўйхатдан ўтинг."); return
-    await message.answer("Қандай хизмат керак?", reply_markup=category_keyboard("order"))
-    await state.set_state(NewOrder.category)
-
-@dp.callback_query(NewOrder.category, F.data.startswith("order:"))
-async def order_category(call: CallbackQuery, state: FSMContext):
-    idx = int(call.data.split(":")[1])
-    if not 0 <= idx < len(CATEGORIES):
-        await call.answer("Нотўғри хизмат тури.", show_alert=True)
+        await message.answer("Аввал /start орқали рўйхатдан ўтинг.")
         return
-    await state.update_data(category=CATEGORIES[idx])
-    await call.message.answer("Муаммо ёки керакли ишни батафсил ёзинг.")
-    await state.set_state(NewOrder.description)
+    await message.answer("Қандай хизмат керак?", reply_markup=categories_markup("order"))
+    await state.set_state(OrderForm.category)
+
+
+@dp.callback_query(OrderForm.category, F.data.startswith("order:"))
+async def order_category(call: CallbackQuery, state: FSMContext):
+    try:
+        category = CATEGORIES[int(call.data.split(":")[1])]
+    except (ValueError, IndexError):
+        await call.answer("Хизмат тури нотўғри.", show_alert=True)
+        return
+    await state.update_data(category=category)
+    await call.message.answer("Муаммони батафсил ёзинг.")
+    await state.set_state(OrderForm.description)
     await call.answer()
 
-@dp.message(NewOrder.description)
+
+@dp.message(OrderForm.description)
 async def order_description(message: Message, state: FSMContext):
-    await state.update_data(description=(message.text or "").strip())
-    await message.answer("Хизмат кўрсатиладиган аниқ манзилни ёзинг.")
-    await state.set_state(NewOrder.address)
+    description = (message.text or "").strip()
+    if len(description) < 5:
+        await message.answer("Илтимос, муаммони батафсилроқ ёзинг.")
+        return
+    await state.update_data(description=description)
+    await message.answer("Манзилингизни ёзинг (туман, кўча, уй).")
+    await state.set_state(OrderForm.address)
 
-@dp.message(NewOrder.address)
+
+@dp.message(OrderForm.address)
 async def order_address(message: Message, state: FSMContext):
-    await state.update_data(address=(message.text or "").strip())
+    address = (message.text or "").strip()
+    if len(address) < 3:
+        await message.answer("Манзилни тўлиқроқ ёзинг.")
+        return
+    await state.update_data(address=address)
     user = await get_user(message.from_user.id)
-    await message.answer(f"Телефон рақамингизни юборинг ёки ёзинг.\nРўйхатдаги рақам: {user['phone']}")
-    await state.set_state(NewOrder.phone)
+    await message.answer(f"Алоқа телефонингиз: {user['phone']}\nЎзгартириш керак бўлса, янги рақамни ёзинг. Ўзгармаса, «Йўқ» деб ёзинг.")
+    await state.set_state(OrderForm.phone)
 
-@dp.message(NewOrder.phone)
+
+@dp.message(OrderForm.phone)
 async def order_phone(message: Message, state: FSMContext):
-    phone = message.contact.phone_number if message.contact else (message.text or "").strip()
+    text = (message.text or "").strip()
+    user = await get_user(message.from_user.id)
+    phone = user["phone"] if text.lower() in {"йўқ", "йук", "yo'q", "yoq"} else text
     if len(phone) < 7:
-        await message.answer("Телефон рақам нотўғри. Қайта киритинг.")
+        await message.answer("Телефон рақам нотўғри. Қайта киритинг ёки «Йўқ» деб ёзинг.")
         return
     await state.update_data(phone=phone)
-    await message.answer("Муаммо расмини юборинг. Агар расм бўлмаса, «Расм йўқ» деб ёзинг.")
-    await state.set_state(NewOrder.photo)
-
-@dp.message(NewOrder.photo)
-async def order_photo(message: Message, state: FSMContext):
-    photo_id = message.photo[-1].file_id if message.photo else None
-    if not photo_id and (message.text or "").strip().lower() not in ("расм йўқ", "rasm yo'q", "йўқ"):
-        await message.answer("Расм юборинг ёки «Расм йўқ» деб ёзинг.")
-        return
-    await state.update_data(photo_id=photo_id)
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💵 Нақд пул", callback_data="pay:cash")],
-        [InlineKeyboardButton(text="💳 Карта орқали", callback_data="pay:card")],
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📷 Расм юбориш", callback_data="photo:yes")],
+        [InlineKeyboardButton(text="Ўтказиб юбориш", callback_data="photo:no")]
     ])
-    await message.answer("Тўлов турини танланг:", reply_markup=kb)
-    await state.set_state(NewOrder.payment)
+    await message.answer("Муаммо расмини юборишни хоҳлайсизми?", reply_markup=markup)
+    await state.set_state(OrderForm.photo)
 
-async def create_order_from_state(message: Message, state: FSMContext, payment_method: str,
-                                  payment_status: str, receipt_file_id: str | None = None):
+
+@dp.callback_query(OrderForm.photo, F.data.startswith("photo:"))
+async def order_photo_choice(call: CallbackQuery, state: FSMContext):
+    choice = call.data.split(":")[1]
+    if choice == "yes":
+        await call.message.answer("Илтимос, муаммо расмини юборинг.")
+        await state.update_data(photo_id=None)
+        await state.set_state(OrderForm.receipt)  # vaqtincha rasm qabul qilish uchun
+        await state.update_data(waiting_order_photo=True)
+    else:
+        await state.update_data(photo_id=None)
+        await call.message.answer("Тўлов турини танланг:", reply_markup=payment_markup())
+        await state.set_state(OrderForm.payment)
+    await call.answer()
+
+
+@dp.message(OrderForm.receipt, F.photo)
+async def receive_order_or_receipt_photo(message: Message, state: FSMContext):
     data = await state.get_data()
+    if data.get("waiting_order_photo"):
+        await state.update_data(photo_id=message.photo[-1].file_id, waiting_order_photo=False)
+        await message.answer("Тўлов турини танланг:", reply_markup=payment_markup())
+        await state.set_state(OrderForm.payment)
+        return
+    # Карта тўлови чеки: администратор тасдиқлагунча буюртма усталарга кўринмайди.
+    receipt_id = message.photo[-1].file_id
+    await create_order(message, state, "card", "pending", receipt_id)
+
+
+@dp.message(OrderForm.receipt)
+async def order_photo_invalid(message: Message, state: FSMContext):
+    data = await state.get_data()
+    if data.get("waiting_order_photo"):
+        await message.answer("Илтимос, расм юборинг ёки /cancel билан бекор қилинг.")
+    else:
+        await message.answer("Карта тўлови чекини расм шаклида юборинг.")
+
+
+async def create_order(message: Message, state: FSMContext, payment_method: str,
+                       payment_status: str, receipt_id: str = None):
+    data = await state.get_data()
+    user = await get_user(message.from_user.id)
+    status = "new" if payment_method == "cash" else "awaiting_payment"
     async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("""INSERT INTO orders(
-            client_id,category,description,address,phone,photo_id,created_at,
-            payment_method,payment_status,receipt_file_id,status)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-            (message.from_user.id, data["category"], data["description"], data["address"],
-             data["phone"], data.get("photo_id"), datetime.now().isoformat(timespec="seconds"),
-             payment_method, payment_status, receipt_file_id,
-             "new" if payment_method == "cash" else "awaiting_payment"))
-        order_id = cur.lastrowid
+        cursor = await db.execute(
+            """INSERT INTO orders(
+                client_id,category,description,address,phone,photo_id,status,
+                payment_method,payment_status,receipt_file_id,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                message.from_user.id, data["category"], data["description"],
+                data["address"], data["phone"], data.get("photo_id"),
+                status, payment_method, payment_status, receipt_id,
+                datetime.now().isoformat(timespec="seconds")
+            )
+        )
+        order_id = cursor.lastrowid
         await db.commit()
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("""SELECT m.tg_id FROM masters m
-            WHERE m.approved=1 AND m.category=?""", (data["category"],))
-        masters = await cur.fetchall()
-
-    method_label = "Нақд пул" if payment_method == "cash" else "Карта орқали"
-    if payment_method == "cash":
-        await message.answer(
-            f"✅ Буюртмангиз қабул қилинди!\nБуюртма рақами: #{order_id}\n"
-            f"Тўлов: {method_label} (иш тугагач устага тўланади).",
-            reply_markup=main_menu("client", await user_is_admin(message.from_user.id)))
-        send_to_masters = True
-    else:
-        await message.answer(
-            f"🧾 Чек администраторга текшириш учун юборилди.\nБуюртма рақами: #{order_id}\n"
-            "Тўлов тасдиқлангач, буюртма усталарга юборилади.",
-            reply_markup=main_menu("client", await user_is_admin(message.from_user.id)))
-        send_to_masters = False
-
-    text = (f"🆕 <b>Буюртма #{order_id}</b>\nЙўналиш: {data['category']}\n"
-            f"Тавсиф: {data['description']}\nМанзил: {data['address']}\n"
-            f"Телефон: {data['phone']}\nТўлов: {method_label}\n"
-            f"Тўлов ҳолати: {payment_status}")
-    if payment_method == "card":
-        admin_kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="✅ Тўловни тасдиқлаш", callback_data=f"payok:{order_id}"),
-            InlineKeyboardButton(text="❌ Рад этиш", callback_data=f"payno:{order_id}")
-        ]])
-        for admin_id in ADMIN_IDS:
-            try:
-                if receipt_file_id:
-                    await bot.send_photo(admin_id, receipt_file_id, caption=text,
-                                         reply_markup=admin_kb, parse_mode="HTML")
-                else:
-                    await bot.send_message(admin_id, text, reply_markup=admin_kb, parse_mode="HTML")
-            except Exception:
-                logging.exception("Payment receipt notify failed")
-    else:
-        await notify_admins(text)
-
-    if send_to_masters:
-        await notify_matching_masters(order_id, data, message.from_user.id)
-
     await state.clear()
+    await message.answer(
+        f"✅ Буюртмангиз қабул қилинди. Рақами: #{order_id}",
+        reply_markup=main_menu(user["role"], await is_admin(message.from_user.id))
+    )
+    if payment_method == "cash":
+        await send_order_to_masters(order_id)
+    else:
+        await send_admins(
+            f"💳 <b>Карта тўлови чеки келди</b>\nБуюртма: #{order_id}\n"
+            f"Мижоз: {user['name']}\nСумма: келишув асосида",
+            InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="✅ Тўловни тасдиқлаш", callback_data=f"payment_ok:{order_id}"),
+                InlineKeyboardButton(text="❌ Рад этиш", callback_data=f"payment_no:{order_id}")
+            ]])
+        )
 
-async def notify_matching_masters(order_id: int, data: dict, client_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("SELECT tg_id FROM masters WHERE approved=1 AND category=?",
-                               (data["category"],))
-        masters = await cur.fetchall()
-    text = (f"🆕 <b>Янги буюртма #{order_id}</b>\nЙўналиш: {data['category']}\n"
-            f"Тавсиф: {data['description']}\nМанзил: {data['address']}\nТелефон: {data['phone']}")
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Қабул қилиш", callback_data=f"take:{order_id}")
-    ]])
-    for master in masters:
-        try:
-            photo_id = data.get("photo_id")
-            if photo_id:
-                await bot.send_photo(master["tg_id"], photo_id, caption=text,
-                                     reply_markup=kb, parse_mode="HTML")
-            else:
-                await bot.send_message(master["tg_id"], text, reply_markup=kb, parse_mode="HTML")
-        except Exception:
-            logging.exception("Master notification failed")
 
-@dp.callback_query(NewOrder.payment, F.data.startswith("pay:"))
-async def choose_payment(call: CallbackQuery, state: FSMContext):
-    method = call.data.split(":")[1]
-    if method == "cash":
-        data = await state.get_data()
-        await call.message.answer("💵 Нақд тўлов танланди. Иш тугагач, ҳақни бевосита устага тўлайсиз.")
-        # Callback has no Message sender context; use bot message as user-facing response and persist.
-        class MessageProxy:
-            from_user = call.from_user
-            async def answer(self, text, **kwargs):
-                await call.message.answer(text, **kwargs)
-        proxy = MessageProxy()
-        await create_order_from_state(proxy, state, "cash", "cash_on_delivery")
-        await call.answer("Нақд тўлов танланди.")
-        return
-
-    if method == "card":
-        if not CARD_NUMBER:
-            await call.answer("Карта реквизитлари ҳали администратор томонидан созланмаган.", show_alert=True)
-            return
-        await state.update_data(payment_method="card")
-        await call.message.answer(
-            f"💳 <b>Карта орқали тўлов</b>\nКарта рақами: <code>{CARD_NUMBER}</code>\n"
-            f"Қабул қилувчи: {CARD_HOLDER}\n\n"
-            "Керакли суммани ўтказинг ва тўлов чекининг расмини юборинг. "
-            "Администратор текшириб тасдиқлайди. Чек тасдиқланмагунча буюртма усталарга берилмайди.",
-            parse_mode="HTML")
-        await state.set_state(NewOrder.receipt)
-        await call.answer()
-        return
-    await call.answer("Нотўғри тўлов тури.", show_alert=True)
-
-@dp.message(NewOrder.receipt)
-async def receive_payment_receipt(message: Message, state: FSMContext):
-    if not message.photo:
-        await message.answer("Илтимос, тўлов чекининг расмини юборинг. Бекор қилиш: /cancel")
-        return
+@dp.callback_query(OrderForm.payment, F.data == "pay:cash")
+async def order_cash(call: CallbackQuery, state: FSMContext):
+    # Create using callback message context without a proxy object.
     data = await state.get_data()
-    class MessageProxy:
-        from_user = message.from_user
-        async def answer(self, text, **kwargs):
-            await message.answer(text, **kwargs)
-    proxy = MessageProxy()
-    await create_order_from_state(proxy, state, "card", "receipt_sent", message.photo[-1].file_id)
-
-@dp.callback_query(F.data.startswith("payok:"))
-async def confirm_card_payment(call: CallbackQuery):
-    if not await user_is_admin(call.from_user.id):
-        await call.answer("Рухсат йўқ.", show_alert=True)
-        return
-    oid = int(call.data.split(":")[1])
+    user = await get_user(call.from_user.id)
     async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("SELECT * FROM orders WHERE id=? AND payment_method='card' AND payment_status='receipt_sent'",
-                               (oid,))
-        order = await cur.fetchone()
-        if not order:
-            await call.answer("Чек топилмади ёки аллақачон кўриб чиқилган.", show_alert=True)
-            return
-        await db.execute("UPDATE orders SET payment_status='paid', status='new' WHERE id=?", (oid,))
+        cursor = await db.execute(
+            """INSERT INTO orders(client_id,category,description,address,phone,photo_id,
+               status,payment_method,payment_status,created_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (call.from_user.id, data["category"], data["description"], data["address"],
+             data["phone"], data.get("photo_id"), "new", "cash", "unpaid",
+             datetime.now().isoformat(timespec="seconds"))
+        )
+        order_id = cursor.lastrowid
         await db.commit()
-        cur = await db.execute("SELECT name FROM users WHERE tg_id=?", (order["client_id"],))
-        client = await cur.fetchone()
-    data = {"category": order["category"], "description": order["description"],
-            "address": order["address"], "phone": order["phone"], "photo_id": order["photo_id"]}
-    await notify_matching_masters(oid, data, order["client_id"])
-    await bot.send_message(order["client_id"], f"✅ #{oid} буюртмангиз учун карта тўлови тасдиқланди. Усталарга юборилди.")
-    await call.message.edit_reply_markup(reply_markup=None)
-    await call.answer("Тўлов тасдиқланди.")
+    await state.clear()
+    await call.message.answer(
+        f"✅ Буюртмангиз қабул қилинди. №{order_id}\nТўловни иш тугагач устага нақд берасиз.",
+        reply_markup=main_menu(user["role"], await is_admin(call.from_user.id))
+    )
+    await send_order_to_masters(order_id)
+    await call.answer()
 
-@dp.callback_query(F.data.startswith("payno:"))
-async def reject_card_payment(call: CallbackQuery):
-    if not await user_is_admin(call.from_user.id):
-        await call.answer("Рухсат йўқ.", show_alert=True)
+
+@dp.callback_query(OrderForm.payment, F.data == "pay:card")
+async def order_card(call: CallbackQuery, state: FSMContext):
+    if not CARD_NUMBER:
+        await call.answer("Карта маълумоти ҳали созланмаган. Нақд тўловни танланг.", show_alert=True)
         return
-    oid = int(call.data.split(":")[1])
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("SELECT client_id FROM orders WHERE id=? AND payment_method='card' AND payment_status='receipt_sent'",
-                               (oid,))
-        order = await cur.fetchone()
-        if not order:
-            await call.answer("Буюртма топилмади ёки аввал кўрилган.", show_alert=True)
-            return
-        await db.execute("UPDATE orders SET payment_status='rejected', status='payment_rejected' WHERE id=?", (oid,))
-        await db.commit()
-    await bot.send_message(order["client_id"], f"❌ #{oid} буюртмангиз бўйича тўлов чеки тасдиқланмади. Илтимос, администратор билан боғланинг.")
-    await call.message.edit_reply_markup(reply_markup=None)
-    await call.answer("Тўлов рад этилди.")
+    await call.message.answer(
+        f"💳 Карта рақами: <code>{CARD_NUMBER}</code>\n"
+        f"Карта эгаси: {CARD_HOLDER}\n\n"
+        "Тўловни амалга ошириб, чек расмини юборинг.",
+        parse_mode="HTML"
+    )
+    await state.update_data(waiting_order_photo=False)
+    await state.set_state(OrderForm.receipt)
+    await call.answer()
+
+
+# -------------------- УСТА БУЮРТМАЛАРИ --------------------
+@dp.message(F.text == "📥 Усталар учун буюртмалар")
+async def master_orders(message: Message):
+    master = await db_fetchone("SELECT * FROM masters WHERE tg_id=?", (message.from_user.id,))
+    if not master or not master["approved"]:
+        await message.answer("Уста профилингиз ҳали администратор томонидан тасдиқланмаган.")
+        return
+    orders = await db_fetchall(
+        """SELECT * FROM orders WHERE category=? AND status='new'
+           AND (payment_method='cash' OR payment_status='paid')
+           ORDER BY id DESC LIMIT 20""",
+        (master["category"],)
+    )
+    if not orders:
+        await message.answer("Ҳозирча сизга мос янги буюртмалар йўқ.")
+        return
+    for order in orders:
+        text = (
+            f"🆕 <b>Буюртма №{order['id']}</b>\n"
+            f"{order['category']}\n{order['description']}\n"
+            f"Манзил: {order['address']}\nТелефон: {order['phone']}"
+        )
+        markup = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Қабул қилиш", callback_data=f"take:{order['id']}")
+        ]])
+        await message.answer(text, parse_mode="HTML", reply_markup=markup)
+
 
 @dp.callback_query(F.data.startswith("take:"))
 async def take_order(call: CallbackQuery):
-    oid = int(call.data.split(":")[1])
+    try:
+        order_id = int(call.data.split(":")[1])
+    except ValueError:
+        await call.answer("Буюртма рақами нотўғри.", show_alert=True)
+        return
+    master = await db_fetchone("SELECT * FROM masters WHERE tg_id=?", (call.from_user.id,))
+    if not master or not master["approved"]:
+        await call.answer("Фақат тасдиқланган усталар буюртмани қабул қила олади.", show_alert=True)
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cur = await db.execute("SELECT * FROM masters WHERE tg_id=? AND approved=1", (call.from_user.id,))
-        master = await cur.fetchone()
-        if not master:
-            await call.answer("Фақат тасдиқланган усталар қабул қила олади.", show_alert=True); return
-        cur = await db.execute("SELECT * FROM orders WHERE id=? AND status='new'", (oid,))
-        order = await cur.fetchone()
+        cursor = await db.execute(
+            """SELECT * FROM orders WHERE id=? AND status='new'
+               AND (payment_method='cash' OR payment_status='paid')""",
+            (order_id,)
+        )
+        order = await cursor.fetchone()
         if not order:
-            await call.answer("Бу буюртма аллақачон олинган ёки ёпилган.", show_alert=True); return
+            await call.answer("Буюртма олинган ёки мавжуд эмас.", show_alert=True)
+            return
         if order["category"] != master["category"]:
             await call.answer("Бу буюртма сизнинг йўналишингизга мос эмас.", show_alert=True)
             return
-        cur = await db.execute("UPDATE orders SET status='accepted', master_id=? WHERE id=? AND status='new'",
-                               (call.from_user.id, oid))
-        await db.commit()
-        if cur.rowcount != 1:
-            await call.answer("Буюртмани бошқа уста олиб бўлди.", show_alert=True)
-            return
-    await call.message.edit_reply_markup(reply_markup=None)
-    await bot.send_message(call.from_user.id,
-        f"✅ Сиз #{oid} буюртмани қабул қилдингиз. Иш тугагач, қуйидаги тугмани босинг.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="🏁 Ишни якунлаш", callback_data=f"done:{oid}")
-        ]]))
-    await bot.send_message(order["client_id"],
-        f"👨‍🔧 Буюртмангиз қабул қилинди!\nУста: {master['category']}\nУста ID: {call.from_user.id}\n"
-        "Уста сиз билан боғланиши учун бироз кутинг.")
-    await call.answer("Буюртма сизга бириктирилди!")
-
-@dp.message(F.text == "🔍 Уста топиш")
-async def find_masters(message: Message):
-    await message.answer("Қайси йўналиш бўйича уста қидирасиз?", reply_markup=category_keyboard("find"))
-
-@dp.callback_query(F.data.startswith("find:"))
-async def find_masters_by_category(call: CallbackQuery):
-    idx = int(call.data.split(":")[1])
-    if not 0 <= idx < len(CATEGORIES):
-        await call.answer("Нотўғри хизмат тури.", show_alert=True)
-        return
-    category = CATEGORIES[idx]
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("""SELECT m.*,u.name,u.phone FROM masters m
-            JOIN users u ON u.tg_id=m.tg_id WHERE m.approved=1 AND m.category=?
-            ORDER BY m.rating DESC""", (category,))
-        rows = await cur.fetchall()
-    if not rows:
-        await call.message.answer(f"Ҳозирча «{category}» бўйича тасдиқланган уста топилмади.")
-    for m in rows[:20]:
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="❤️ Севимлиларга қўшиш", callback_data=f"fav:{m['tg_id']}")
-        ]])
-        await call.message.answer(
-            f"👨‍🔧 <b>{m['name']}</b>\nЙўналиш: {m['category']}\nТажриба: {m['experience']}\n"
-            f"Ҳудуд: {m['district']}\nРейтинг: {m['rating']:.1f} ⭐ ({m['reviews']} та)\n"
-            f"Телефон: {m['phone']}", parse_mode="HTML", reply_markup=kb
+        cursor = await db.execute(
+            "UPDATE orders SET status='accepted', master_id=? WHERE id=? AND status='new'",
+            (call.from_user.id, order_id)
         )
-    await call.answer()
-
-@dp.callback_query(F.data.startswith("fav:"))
-async def favorite_master(call: CallbackQuery):
-    mid = int(call.data.split(":")[1])
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("INSERT OR IGNORE INTO favorites(client_id,master_id) VALUES(?,?)",
-                         (call.from_user.id, mid))
         await db.commit()
-    await call.answer("❤️ Севимли усталарга қўшилди!", show_alert=True)
+        if cursor.rowcount != 1:
+            await call.answer("Буюртмани бошқа уста қабул қилди.", show_alert=True)
+            return
+    client = await get_user(order["client_id"])
+    master_user = await get_user(call.from_user.id)
+    await call.message.edit_reply_markup(reply_markup=None)
+    await call.message.answer(f"Сиз #{order_id} буюртмани қабул қилдингиз.")
+    await bot.send_message(
+        call.from_user.id,
+        "Иш тугагач, қуйидаги тугмани босинг.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🏁 Ишни якунлаш", callback_data=f"done:{order_id}")
+        ]])
+    )
+    await bot.send_message(
+        order["client_id"],
+        f"👨‍🔧 Буюртмангиз қабул қилинди!\nУста: {master_user['name']}\nТелефон: {master_user['phone']}"
+    )
+    await call.answer("Буюртма сизга бириктирилди.")
 
-@dp.message(F.text == "📋 Буюртмаларим")
-async def my_orders(message: Message):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("SELECT * FROM orders WHERE client_id=? ORDER BY id DESC LIMIT 10",
-                               (message.from_user.id,))
-        rows = await cur.fetchall()
-    if not rows:
-        await message.answer("Сизда ҳозирча буюртмалар йўқ."); return
-    for o in rows:
-        text = f"#{o['id']} — {o['category']}\n{o['description']}\nҲолати: {o['status']}"
-        markup = None
-        if o["status"] == "completed":
-            async with aiosqlite.connect(DB_PATH) as db:
-                cur = await db.execute("SELECT id FROM reviews WHERE order_id=?", (o["id"],))
-                reviewed = await cur.fetchone()
-            if not reviewed:
-                markup = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="⭐ Баҳолаш", callback_data=f"rate:{o['id']}")
-                ]])
-        await message.answer(text, reply_markup=markup)
 
 @dp.callback_query(F.data.startswith("done:"))
 async def complete_order(call: CallbackQuery):
-    oid = int(call.data.split(":")[1])
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("SELECT * FROM orders WHERE id=? AND master_id=? AND status='accepted'",
-                               (oid, call.from_user.id))
-        order = await cur.fetchone()
-        if not order:
-            await call.answer("Буюртма топилмади ёки сизга тегишли эмас.", show_alert=True)
-            return
-        await db.execute("UPDATE orders SET status='completed' WHERE id=?", (oid,))
-        await db.commit()
-    await bot.send_message(order["client_id"], f"🏁 Буюртма #{oid} якунланди. «Буюртмаларим» бўлимидан устага баҳо беринг.")
+    try:
+        order_id = int(call.data.split(":")[1])
+    except ValueError:
+        await call.answer("Буюртма рақами нотўғри.", show_alert=True)
+        return
+    order = await db_fetchone(
+        "SELECT * FROM orders WHERE id=? AND master_id=? AND status='accepted'",
+        (order_id, call.from_user.id)
+    )
+    if not order:
+        await call.answer("Бу буюртма сизга бириктирилмаган ёки якунланган.", show_alert=True)
+        return
+    await db_execute("UPDATE orders SET status='completed' WHERE id=?", (order_id,))
     await call.message.edit_reply_markup(reply_markup=None)
+    await bot.send_message(
+        order["client_id"],
+        f"✅ #{order_id} буюртма якунланди. Устага 1 дан 5 гача баҳо беринг.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"{n} ⭐", callback_data=f"rate:{order_id}:{n}") for n in range(1, 6)]
+        ])
+    )
     await call.answer("Буюртма якунланди.")
 
-@dp.callback_query(F.data.startswith("rate:"))
-async def rate_order(call: CallbackQuery):
-    oid = int(call.data.split(":")[1])
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("SELECT * FROM orders WHERE id=? AND client_id=? AND status='completed'",
-                               (oid, call.from_user.id))
-        order = await cur.fetchone()
-        cur = await db.execute("SELECT id FROM reviews WHERE order_id=?", (oid,))
-        already = await cur.fetchone()
-    if not order or already:
-        await call.answer("Баҳолаш мумкин эмас ёки аввал баҳоланган.", show_alert=True)
-        return
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=f"{n} ⭐", callback_data=f"rating:{oid}:{n}") for n in range(1, 6)
-    ]])
-    await call.message.answer(f"Буюртма #{oid} учун баҳо танланг:", reply_markup=kb)
-    await call.answer()
 
-@dp.callback_query(F.data.startswith("rating:"))
-async def save_rating(call: CallbackQuery):
-    _, oid_s, rating_s = call.data.split(":")
-    oid, rating = int(oid_s), int(rating_s)
+# -------------------- МИЖОЗ БУЮРТМАЛАРИ ВА БАҲОЛАР --------------------
+@dp.message(F.text == "📋 Буюртмаларим")
+async def my_orders(message: Message):
+    orders = await db_fetchall(
+        "SELECT * FROM orders WHERE client_id=? ORDER BY id DESC LIMIT 20",
+        (message.from_user.id,)
+    )
+    if not orders:
+        await message.answer("Сизда ҳозирча буюртмалар йўқ.")
+        return
+    for order in orders:
+        payment = "Нақд" if order["payment_method"] == "cash" else "Карта"
+        await message.answer(
+            f"Буюртма №{order['id']}\nХизмат: {order['category']}\n"
+            f"Ҳолати: {order['status']}\nТўлов: {payment} ({order['payment_status']})"
+        )
+
+
+@dp.callback_query(F.data.startswith("rate:"))
+async def rate_order(call: CallbackQuery, state: FSMContext):
+    try:
+        _, order_id_text, rating_text = call.data.split(":")
+        order_id, rating = int(order_id_text), int(rating_text)
+    except ValueError:
+        await call.answer("Баҳо маълумоти нотўғри.", show_alert=True)
+        return
     if rating < 1 or rating > 5:
         await call.answer("Баҳо 1 дан 5 гача бўлиши керак.", show_alert=True)
         return
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("SELECT * FROM orders WHERE id=? AND client_id=? AND status='completed'",
-                               (oid, call.from_user.id))
-        order = await cur.fetchone()
-        if not order:
-            await call.answer("Буюртма топилмади.", show_alert=True)
-            return
-        cur = await db.execute("SELECT id FROM reviews WHERE order_id=?", (oid,))
-        if await cur.fetchone():
-            await call.answer("Бу буюртма аллақачон баҳоланган.", show_alert=True)
-            return
-        await db.execute("""INSERT INTO reviews(order_id,client_id,master_id,rating,comment,created_at)
-            VALUES(?,?,?,?,?,?)""",
-            (oid, call.from_user.id, order["master_id"], rating, "", datetime.now().isoformat(timespec="seconds")))
-        cur = await db.execute("SELECT AVG(rating),COUNT(*) FROM reviews WHERE master_id=?", (order["master_id"],))
-        avg, count = await cur.fetchone()
-        await db.execute("UPDATE masters SET rating=?,reviews=? WHERE tg_id=?",
-                         (avg or 0, count or 0, order["master_id"]))
-        await db.commit()
-    await call.message.answer(f"Раҳмат! {rating} юлдузли баҳо сақланди.")
-    await call.answer("Баҳо сақланди.")
-
-@dp.message(F.text == "📥 Усталар учун буюртмалар")
-async def master_orders(message: Message):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("""SELECT o.* FROM orders o JOIN masters m ON m.tg_id=?
-            WHERE m.approved=1 AND o.status='new' AND (o.payment_method='cash' OR o.payment_status='paid')
-            AND o.category=m.category ORDER BY o.id DESC LIMIT 10""",
-            (message.from_user.id,))
-        rows = await cur.fetchall()
-    if not rows:
-        await message.answer("Ҳозирча янги буюртмалар йўқ."); return
-    for o in rows:
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="✅ Қабул қилиш", callback_data=f"take:{o['id']}")
-        ]])
-        await message.answer(f"Буюртма #{o['id']}\n{o['category']}\n{o['description']}\nМанзил: {o['address']}", reply_markup=kb)
-
-@dp.message(F.text == "👤 Шахсий кабинет")
-async def profile(message: Message):
-    u = await get_user(message.from_user.id)
-    if not u:
-        await message.answer("Аввал /start орқали рўйхатдан ўтинг."); return
-    await message.answer(f"👤 {u['name']}\n📞 {u['phone']}\n📍 {u['district']}\nРоль: {u['role']}")
-
-@dp.message(F.text == "⭐ Баҳолар ва фикрлар")
-async def reviews_info(message: Message):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("""SELECT r.rating,r.comment,u.name FROM reviews r
-            LEFT JOIN users u ON u.tg_id=r.client_id ORDER BY r.id DESC LIMIT 10""")
-        rows = await cur.fetchall()
-    if not rows:
-        await message.answer("⭐ Ҳозирча баҳолар йўқ. Бажарилган буюртмадан кейин баҳо беришингиз мумкин.")
+    order = await db_fetchone(
+        "SELECT * FROM orders WHERE id=? AND client_id=? AND status='completed'",
+        (order_id, call.from_user.id)
+    )
+    if not order or not order["master_id"]:
+        await call.answer("Баҳолаш мумкин эмас.", show_alert=True)
         return
-    for r in rows:
-        await message.answer(f"⭐ {r['rating']}/5 — {r['name'] or 'Мижоз'}\n{r['comment'] or 'Изоҳ йўқ'}")
-
-@dp.message(F.text == "❤️ Севимли усталар")
-async def favorites_info(message: Message):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("""SELECT u.name,u.phone,m.category,m.district,m.rating,m.tg_id
-            FROM favorites f JOIN users u ON u.tg_id=f.master_id
-            JOIN masters m ON m.tg_id=f.master_id WHERE f.client_id=?""", (message.from_user.id,))
-        rows = await cur.fetchall()
-    if not rows:
-        await message.answer("❤️ Севимлилар рўйхати бўш. «Уста топиш» бўлимидан усталарни сақланг.")
+    exists = await db_fetchone("SELECT id FROM reviews WHERE order_id=?", (order_id,))
+    if exists:
+        await call.answer("Бу буюртма баҳоланган.", show_alert=True)
         return
-    for m in rows:
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="❌ Рўйхатдан ўчириш", callback_data=f"unfav:{m['tg_id']}")
-        ]])
-        await message.answer(f"❤️ {m['name']}\n{m['category']} | {m['district']}\nРейтинг: {m['rating']:.1f} ⭐\nТелефон: {m['phone']}", reply_markup=kb)
-
-@dp.callback_query(F.data.startswith("unfav:"))
-async def unfavorite_master(call: CallbackQuery):
-    mid = int(call.data.split(":")[1])
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM favorites WHERE client_id=? AND master_id=?", (call.from_user.id, mid))
-        await db.commit()
-    await call.message.edit_text("Севимли усталар рўйхатидан ўчирилди.")
-    await call.answer("Ўчирилди")
-
-@dp.message(F.text == "☎️ Ёрдам маркази")
-async def help_center(message: Message, state: FSMContext):
-    await message.answer("Савол ёки муаммоингизни ёзинг. Администраторга етказамиз. Бекор қилиш: /cancel")
-    await state.set_state(HelpMessage.text)
-
-@dp.message(HelpMessage.text)
-async def help_message_send(message: Message, state: FSMContext):
-    body = (message.text or "").strip()
-    if len(body) < 3:
-        await message.answer("Илтимос, мурожаатингизни батафсилроқ ёзинг.")
-        return
-    user = await get_user(message.from_user.id)
-    name = user["name"] if user else message.from_user.full_name
-    await notify_admins(f"☎️ <b>ЁРДАМ СЎРОВИ</b>\n{name} | ID: <code>{message.from_user.id}</code>\n{body}")
-    await state.clear()
-    await message.answer("✅ Мурожаатингиз администраторга юборилди.",
-        reply_markup=main_menu(user["role"] if user else "client", await user_is_admin(message.from_user.id)))
-
-@dp.message(F.text == "⚙️ Админ панели")
-async def admin_panel(message: Message):
-    if not await user_is_admin(message.from_user.id):
-        await message.answer("⛔ Сизда администратор рухсати йўқ."); return
-    await message.answer("⚙️ <b>АДМИН ПАНЕЛИ</b>", reply_markup=admin_keyboard(), parse_mode="HTML")
-
-@dp.callback_query(F.data.startswith("adm:"))
-async def admin_actions(call: CallbackQuery, state: FSMContext):
-    if not await user_is_admin(call.from_user.id):
-        await call.answer("Рухсат йўқ.", show_alert=True); return
-    action = call.data.split(":")[1]
-    if action == "stats":
-        async with aiosqlite.connect(DB_PATH) as db:
-            async def count(sql):
-                cur = await db.execute(sql); return (await cur.fetchone())[0]
-            users = await count("SELECT COUNT(*) FROM users")
-            masters = await count("SELECT COUNT(*) FROM masters")
-            approved = await count("SELECT COUNT(*) FROM masters WHERE approved=1")
-            orders = await count("SELECT COUNT(*) FROM orders")
-            new = await count("SELECT COUNT(*) FROM orders WHERE status='new'")
-        await call.message.answer(f"📊 <b>Статистика</b>\nФойдаланувчилар: {users}\nУсталар: {masters}\nТасдиқланган усталар: {approved}\nБуюртмалар: {orders}\nЯнги буюртмалар: {new}", parse_mode="HTML")
-    elif action == "masters":
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            cur = await db.execute("""SELECT m.*,u.name FROM masters m JOIN users u ON u.tg_id=m.tg_id
-                WHERE m.approved=0 ORDER BY m.tg_id DESC LIMIT 20""")
-            rows = await cur.fetchall()
-        if not rows:
-            await call.message.answer("Кутилayotgan тасдиқлаш аризалари йўқ.")
-        for m in rows:
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="✅ Тасдиқлаш", callback_data=f"approve:{m['tg_id']}"),
-                InlineKeyboardButton(text="❌ Рад этиш", callback_data=f"reject:{m['tg_id']}")
-            ]])
-            await call.message.answer(f"{m['name']} | ID: {m['tg_id']}\n{m['category']}\n{m['experience']}\n{m['district']}", reply_markup=kb)
-    elif action == "orders":
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            cur = await db.execute("SELECT * FROM orders WHERE status='new' ORDER BY id DESC LIMIT 20")
-            rows = await cur.fetchall()
-        if not rows:
-            await call.message.answer("Очиқ буюртмалар йўқ.")
-        for o in rows:
-            await call.message.answer(f"#{o['id']} | {o['category']}\n{o['description']}\nМижоз ID: {o['client_id']}")
-    elif action == "broadcast":
-        await call.message.answer("Барча фойдаланувчиларга юбориладиган хабар матнини ёзинг.")
-        await state.set_state(Broadcast.text)
+    await db_execute(
+        """INSERT INTO reviews(order_id,client_id,master_id,rating,created_at)
+           VALUES(?,?,?,?,?)""",
+        (order_id, call.from_user.id, order["master_id"], rating,
+         datetime.now().isoformat(timespec="seconds"))
+    )
+    stats = await db_fetchone(
+        "SELECT AVG(rating) AS avg_rating, COUNT(*) AS total FROM reviews WHERE master_id=?",
+        (order["master_id"],)
+    )
+    await db_execute(
+        "UPDATE masters SET rating=?, reviews=? WHERE tg_id=?",
+        (stats["avg_rating"] or 0, stats["total"], order["master_id"])
+    )
+    await call.message.answer("⭐ Раҳмат! Баҳонгиз сақланди.")
     await call.answer()
 
-@dp.message(Broadcast.text)
-async def broadcast_send(message: Message, state: FSMContext):
-    if not await user_is_admin(message.from_user.id):
-        await state.clear(); return
+
+@dp.message(F.text == "⭐ Баҳолар")
+async def reviews_list(message: Message):
+    rows = await db_fetchall(
+        """SELECT r.rating,r.comment,u.name,m.category
+           FROM reviews r JOIN users u ON u.tg_id=r.client_id
+           JOIN masters m ON m.tg_id=r.master_id
+           ORDER BY r.id DESC LIMIT 10"""
+    )
+    if not rows:
+        await message.answer("Ҳозирча баҳолар йўқ.")
+        return
+    for row in rows:
+        await message.answer(
+            f"⭐ {row['rating']}/5 — {row['category']}\nМижоз: {row['name']}\n{row['comment'] or ''}"
+        )
+
+
+# -------------------- ЁРДАМ ВА КАБИНЕТ --------------------
+@dp.message(F.text == "👤 Шахсий кабинет")
+async def profile(message: Message):
+    user = await get_user(message.from_user.id)
+    if not user:
+        await message.answer("Аввал /start орқали рўйхатдан ўтинг.")
+        return
+    master = await db_fetchone("SELECT * FROM masters WHERE tg_id=?", (message.from_user.id,))
+    text = (
+        f"👤 {user['name']}\nТелефон: {user['phone']}\nҲудуд: {user['district']}\n"
+        f"Роль: {user['role']}"
+    )
+    if master:
+        text += f"\nУста йўналиши: {master['category']}\nТасдиқланган: {'Ҳа' if master['approved'] else 'Йўқ'}"
+    await message.answer(text)
+
+
+@dp.message(F.text == "☎️ Ёрдам")
+async def support_start(message: Message, state: FSMContext):
+    await message.answer("Администраторга хабарингизни ёзинг.")
+    await state.set_state(SupportForm.message)
+
+
+@dp.message(SupportForm.message)
+async def support_send(message: Message, state: FSMContext):
     text = (message.text or "").strip()
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT tg_id FROM users")
-        ids = [r[0] for r in await cur.fetchall()]
-    sent = 0
-    for uid in ids:
-        try:
-            await bot.send_message(uid, text)
-            sent += 1
-            await asyncio.sleep(0.04)
-        except Exception:
-            pass
+    if not text:
+        await message.answer("Матнли хабар юборинг.")
+        return
+    user = await get_user(message.from_user.id)
+    await send_admins(
+        f"☎️ <b>Ёрдам сўрови</b>\nФойдаланувчи: {user['name'] if user else 'номаълум'} "
+        f"(ID: {message.from_user.id})\n\n{text}"
+    )
     await state.clear()
-    await message.answer(f"📢 Хабар {sent} та фойдаланувчига юборилди.",
-                         reply_markup=main_menu("client", True))
+    await message.answer("Хабарингиз администраторга юборилди.")
+
 
 @dp.message(Command("cancel"))
 async def cancel(message: Message, state: FSMContext):
     await state.clear()
     user = await get_user(message.from_user.id)
+    role = user["role"] if user else "client"
     await message.answer("Жорий амал бекор қилинди.",
-        reply_markup=main_menu(user["role"] if user else "client", await user_is_admin(message.from_user.id)))
+                         reply_markup=main_menu(role, await is_admin(message.from_user.id)))
 
-@dp.message()
-async def fallback(message: Message):
-    await message.answer("Менюдан керакли бўлимни танланг ёки /start буйруғини юборинг.")
 
+# -------------------- АДМИН ПАНЕЛИ --------------------
+@dp.message(F.text == "⚙️ Админ панели")
+async def admin_panel(message: Message):
+    if not await is_admin(message.from_user.id):
+        await message.answer("Бу бўлим фақат администратор учун.")
+        return
+    await message.answer("⚙️ Администратор панели", reply_markup=admin_markup())
+
+
+@dp.callback_query(F.data.startswith("admin:"))
+async def admin_actions(call: CallbackQuery, state: FSMContext):
+    if not await is_admin(call.from_user.id):
+        await call.answer("Рухсат йўқ.", show_alert=True)
+        return
+    action = call.data.split(":")[1]
+    if action == "stats":
+        users = await db_fetchone("SELECT COUNT(*) AS n FROM users")
+        masters = await db_fetchone("SELECT COUNT(*) AS n FROM masters")
+        orders = await db_fetchone("SELECT COUNT(*) AS n FROM orders")
+        await call.message.answer(
+            f"📊 Статистика\nФойдаланувчилар: {users['n']}\n"
+            f"Усталар: {masters['n']}\nБуюртмалар: {orders['n']}"
+        )
+    elif action == "masters":
+        masters = await db_fetchall(
+            """SELECT m.*,u.name,u.phone FROM masters m JOIN users u ON u.tg_id=m.tg_id
+               WHERE m.approved=0 ORDER BY m.tg_id DESC LIMIT 20"""
+        )
+        if not masters:
+            await call.message.answer("Кутилayotgan уста аризалари йўқ.")
+        for master in masters:
+            await call.message.answer(
+                f"Уста: {master['name']}\nТелефон: {master['phone']}\n"
+                f"Йўналиш: {master['category']}\nТажриба: {master['experience']}\n"
+                f"Маълумот: {master['about']}",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="✅ Тасдиқлаш", callback_data=f"approve_master:{master['tg_id']}"),
+                    InlineKeyboardButton(text="❌ Рад этиш", callback_data=f"reject_master:{master['tg_id']}")
+                ]])
+            )
+    elif action == "payments":
+        rows = await db_fetchall(
+            "SELECT * FROM orders WHERE payment_method='card' AND payment_status='pending' ORDER BY id"
+        )
+        if not rows:
+            await call.message.answer("Текшириш учун карта тўлови йўқ.")
+        for order in rows:
+            await call.message.answer(
+                f"💳 Буюртма №{order['id']}\nМижоз ID: {order['client_id']}\n"
+                f"Йўналиш: {order['category']}",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="✅ Тасдиқлаш", callback_data=f"payment_ok:{order['id']}"),
+                    InlineKeyboardButton(text="❌ Рад этиш", callback_data=f"payment_no:{order['id']}")
+                ]])
+            )
+            if order["receipt_file_id"]:
+                await bot.send_photo(call.from_user.id, order["receipt_file_id"])
+    elif action == "orders":
+        rows = await db_fetchall("SELECT * FROM orders ORDER BY id DESC LIMIT 20")
+        if not rows:
+            await call.message.answer("Буюртмалар йўқ.")
+        for order in rows:
+            await call.message.answer(
+                f"№{order['id']} | {order['category']}\nҲолати: {order['status']}\n"
+                f"Тўлов: {order['payment_method']} / {order['payment_status']}"
+            )
+    elif action == "broadcast":
+        await call.message.answer("Барча фойдаланувчиларга юбориладиган хабарни ёзинг.")
+        await state.set_state(BroadcastForm.message)
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("approve_master:"))
+async def approve_master(call: CallbackQuery):
+    if not await is_admin(call.from_user.id):
+        await call.answer("Рухсат йўқ.", show_alert=True)
+        return
+    master_id = int(call.data.split(":")[1])
+    await db_execute("UPDATE masters SET approved=1 WHERE tg_id=?", (master_id,))
+    await db_execute("UPDATE users SET role='master' WHERE tg_id=?", (master_id,))
+    try:
+        await bot.send_message(master_id, "✅ Уста профилингиз тасдиқланди. Энди буюртмаларни қабул қилишингиз мумкин.")
+    except Exception:
+        logger.exception("Устага тасдиқ хабари юборилмади")
+    await call.message.edit_reply_markup(reply_markup=None)
+    await call.answer("Уста тасдиқланди.")
+
+
+@dp.callback_query(F.data.startswith("reject_master:"))
+async def reject_master(call: CallbackQuery):
+    if not await is_admin(call.from_user.id):
+        await call.answer("Рухсат йўқ.", show_alert=True)
+        return
+    master_id = int(call.data.split(":")[1])
+    await db_execute("DELETE FROM masters WHERE tg_id=? AND approved=0", (master_id,))
+    try:
+        await bot.send_message(master_id, "❌ Уста аризангиз рад этилди. Қўшимча маълумот учун администраторга ёзинг.")
+    except Exception:
+        logger.exception("Устага рад жавоби юборилмади")
+    await call.message.edit_reply_markup(reply_markup=None)
+    await call.answer("Ариза рад этилди.")
+
+
+@dp.callback_query(F.data.startswith("payment_ok:"))
+async def payment_approve(call: CallbackQuery):
+    if not await is_admin(call.from_user.id):
+        await call.answer("Рухсат йўқ.", show_alert=True)
+        return
+    order_id = int(call.data.split(":")[1])
+    order = await db_fetchone("SELECT * FROM orders WHERE id=?", (order_id,))
+    if not order or order["payment_status"] != "pending":
+        await call.answer("Тўлов топилмади ёки аллақачон кўрилган.", show_alert=True)
+        return
+    await db_execute(
+        "UPDATE orders SET payment_status='paid', status='new' WHERE id=?",
+        (order_id,)
+    )
+    await bot.send_message(order["client_id"], f"✅ #{order_id} карта тўлови тасдиқланди. Буюртмангиз усталарга юборилди.")
+    await send_order_to_masters(order_id)
+    await call.message.edit_reply_markup(reply_markup=None)
+    await call.answer("Тўлов тасдиқланди.")
+
+
+@dp.callback_query(F.data.startswith("payment_no:"))
+async def payment_reject(call: CallbackQuery):
+    if not await is_admin(call.from_user.id):
+        await call.answer("Рухсат йўқ.", show_alert=True)
+        return
+    order_id = int(call.data.split(":")[1])
+    order = await db_fetchone("SELECT * FROM orders WHERE id=?", (order_id,))
+    if not order or order["payment_status"] != "pending":
+        await call.answer("Тўлов топилмади ёки аллақачон кўрилган.", show_alert=True)
+        return
+    await db_execute(
+        "UPDATE orders SET payment_status='rejected', status='payment_rejected' WHERE id=?",
+        (order_id,)
+    )
+    await bot.send_message(order["client_id"], f"❌ #{order_id} карта тўлови тасдиқланмади. Ёрдам учун администраторга мурожаат қилинг.")
+    await call.message.edit_reply_markup(reply_markup=None)
+    await call.answer("Тўлов рад этилди.")
+
+
+@dp.message(BroadcastForm.message)
+async def broadcast_send(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        await state.clear()
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Матнли хабар юборинг.")
+        return
+    users = await db_fetchall("SELECT tg_id FROM users")
+    success = 0
+    for user in users:
+        try:
+            await bot.send_message(user["tg_id"], text)
+            success += 1
+        except Exception:
+            logger.warning("Broadcast failed for %s", user["tg_id"])
+    await state.clear()
+    await message.answer(f"📢 Хабар {success} та фойдаланувчига юборилди.")
+
+
+# -------------------- ИШГА ТУШИРИШ --------------------
 async def main():
     await init_db()
-    logging.info("USTA 24 ANDIJON bot started")
-    await dp.start_polling(bot)
+    logger.info("USTA 24 ANDIJON боти ишга тушмоқда...")
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
