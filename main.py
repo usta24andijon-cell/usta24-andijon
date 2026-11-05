@@ -1,4 +1,3 @@
-
 import asyncio
 import logging
 import os
@@ -395,11 +394,19 @@ async def registration_role(call: CallbackQuery, state: FSMContext):
 # -------------------- УСТА БЎЛИШ ВА ҚИДИРИШ --------------------
 @dp.message(F.text == "📩 Администраторга мурожаат")
 async def contact_admin(message: Message, state: FSMContext):
-    await state.set_state(SupportForm.message)
+    await state.clear()
+    markup = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="✉️ Telegram орқали администраторга ёзиш",
+            url="https://t.me/USTA24ADMIN"
+        )
+    ]])
     await message.answer(
-        "Уста бўлиб қўшилмоқчимисиз ёки саволингиз борми? "
-        "Хабарингизни ёзинг, администраторга етказамиз.\\n\\n"
-        "📞 Администратор: +998 77 069 00 03"
+        "Администратор билан тўғридан-тўғри Telegram орқали боғланиш учун "
+        "қуйидаги тугмани босинг.\\n\\n"
+        "📞 Телефон: +998 77 069 00 03\\n"
+        "👤 Telegram: @USTA24ADMIN",
+        reply_markup=markup
     )
 
 
