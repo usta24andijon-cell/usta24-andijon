@@ -1,4 +1,3 @@
-
 import asyncio
 import logging
 import os
@@ -235,6 +234,22 @@ async def init_db():
                 client_id INTEGER NOT NULL,
                 master_id INTEGER NOT NULL,
                 UNIQUE(client_id, master_id)
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS master_locations (
+                master_id INTEGER PRIMARY KEY,
+                latitude REAL NOT NULL,
+                longitude REAL NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS client_locations (
+                client_id INTEGER PRIMARY KEY,
+                latitude REAL NOT NULL,
+                longitude REAL NOT NULL,
+                updated_at TEXT NOT NULL
             )
         """)
         # Аввалги версиялардан қолган база учун миграция.
@@ -1033,7 +1048,7 @@ async def show_main_menu(message: Message, state: FSMContext):
 @dp.message(F.text == "📍 Joylashuv yuborish")
 async def client_share_location(message: Message):
     await message.answer(
-        "📍 Жойлашувингизни юбориш учун тугмани босинг.",
+        "📍 Мижоз, жойлашувингизни юбориш учун пастдаги тугмани босинг. Жойлашувингиз сақланади ва фаол буюртмангиз бўлса, бириктирилган устага юборилади.",
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="📍 Жойлашувни юбориш", request_location=True)]],
             resize_keyboard=True, one_time_keyboard=True
@@ -1058,30 +1073,55 @@ async def master_share_location_prompt(message: Message):
 
 @dp.message(F.location)
 async def save_shared_location(message: Message):
-    master = await db_fetchone("SELECT approved FROM masters WHERE tg_id=?", (message.from_user.id,))
-    if not master or not master["approved"]:
-        return
     loc = message.location
+    now = datetime.now().isoformat(timespec="seconds")
+
+    # Tasdiqlangan usta joylashuvi
+    master = await db_fetchone("SELECT approved FROM masters WHERE tg_id=?", (message.from_user.id,))
+    if master and master["approved"]:
+        await db_execute(
+            """INSERT INTO master_locations(master_id,latitude,longitude,updated_at)
+               VALUES(?,?,?,?) ON CONFLICT(master_id) DO UPDATE SET
+               latitude=excluded.latitude, longitude=excluded.longitude,
+               updated_at=excluded.updated_at""",
+            (message.from_user.id, loc.latitude, loc.longitude, now)
+        )
+        active = await db_fetchall(
+            "SELECT client_id,id FROM orders WHERE master_id=? AND status='accepted'",
+            (message.from_user.id,)
+        )
+        for order in active:
+            try:
+                await bot.send_location(order["client_id"], loc.latitude, loc.longitude)
+                await bot.send_message(order["client_id"], f"📍 Устангиз #{order['id']} буюртма бўйича жойлашувини янгилади.")
+            except Exception:
+                logger.exception("Мижозга уста жойлашуви юборилмади")
+        await message.answer("✅ Жойлашувингиз сақланди ва фаол буюртма мижозларига юборилди.")
+        return
+
+    # Mijoz joylashuvi
+    user = await get_user(message.from_user.id)
+    if not user or user["role"] != "client":
+        await message.answer("Жойлашувни юбориш учун аввал /start орқали рўйхатдан ўтинг.")
+        return
     await db_execute(
-        """INSERT INTO master_locations(master_id,latitude,longitude,updated_at)
-           VALUES(?,?,?,?)
-           ON CONFLICT(master_id) DO UPDATE SET
+        """INSERT INTO client_locations(client_id,latitude,longitude,updated_at)
+           VALUES(?,?,?,?) ON CONFLICT(client_id) DO UPDATE SET
            latitude=excluded.latitude, longitude=excluded.longitude,
            updated_at=excluded.updated_at""",
-        (message.from_user.id, loc.latitude, loc.longitude,
-         datetime.now().isoformat(timespec="seconds"))
+        (message.from_user.id, loc.latitude, loc.longitude, now)
     )
     active = await db_fetchall(
-        "SELECT client_id,id FROM orders WHERE master_id=? AND status='accepted'",
+        "SELECT master_id,id FROM orders WHERE client_id=? AND status='accepted' AND master_id IS NOT NULL",
         (message.from_user.id,)
     )
     for order in active:
         try:
-            await bot.send_location(order["client_id"], loc.latitude, loc.longitude)
-            await bot.send_message(order["client_id"], f"📍 Устангиз #{order['id']} буюртма бўйича жойлашувини янгилади.")
+            await bot.send_location(order["master_id"], loc.latitude, loc.longitude)
+            await bot.send_message(order["master_id"], f"📍 Мижоз #{order['id']} буюртма бўйича жойлашувини юборди.")
         except Exception:
-            logger.exception("Мижозга уста жойлашуви юборилмади")
-    await message.answer("✅ Жойлашувингиз сақланди ва фаол буюртмаларингиз мижозларига юборилди.")
+            logger.exception("Устага мижоз жойлашуви юборилмади")
+    await message.answer("✅ Жойлашувингиз сақланди. Фаол буюртмангиз бўлса, устага ҳам юборилди.")
 
 
 @dp.message(F.text == "🚚 Usta joylashuvini kuzatish")
