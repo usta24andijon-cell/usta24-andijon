@@ -1,3 +1,4 @@
+
 import asyncio
 import logging
 import os
@@ -94,36 +95,20 @@ class BroadcastForm(StatesGroup):
 
 # -------------------- КЛАВИАТУРАЛАР --------------------
 def main_menu(role: str = "client", is_admin: bool = False):
+    # Ҳамма фойдаланувчи учун ягона умумий меню.
     rows = [
         [KeyboardButton(text="🔎 Xizmat tanlash / Buyurtma berish")],
-        [KeyboardButton(text="📍 Joylashuv yuborish")],
+        [KeyboardButton(text="📍 Joylashув yuborish")],
         [KeyboardButton(text="📋 Buyurtmalarim"),
          KeyboardButton(text="🚚 Usta joylashuvini kuzatish")],
         [KeyboardButton(text="❤️ Sevimli ustalarim"),
          KeyboardButton(text="⭐ Baholar")],
         [KeyboardButton(text="👤 Shaxsiy kabinet"),
          KeyboardButton(text="💳 Toʻlovlarim")],
+        [KeyboardButton(text="📩 Администраторга мурожаат")],
         [KeyboardButton(text="💬 Yordam"),
          KeyboardButton(text="ℹ️ Qoʻllanma")],
     ]
-    if role == "master":
-        rows = [
-            [KeyboardButton(text="👨‍🔧 USTA KABINETI")],
-            [KeyboardButton(text="📍 Joylashuvimni yuborish")],
-            [KeyboardButton(text="📥 Yangi buyurtmalar"),
-             KeyboardButton(text="📌 Qabul qilgan buyurtmalarim")],
-            [KeyboardButton(text="🔄 Jarayondagi ishlarim"),
-             KeyboardButton(text="✅ Tugallangan ishlarim")],
-            [KeyboardButton(text="⭐ Mening reytingim"),
-             KeyboardButton(text="💰 Daromadlarim")],
-            [KeyboardButton(text="📊 Ish faoliyatim"),
-             KeyboardButton(text="👤 Profilim")],
-            [KeyboardButton(text="✏️ Ma’lumotlarni tahrirlash")],
-            [KeyboardButton(text="💬 Yordam"),
-             KeyboardButton(text="⬅️ Asosiy menyu")],
-        ]
-    else:
-        rows.append([KeyboardButton(text="👨‍🔧 Usta bo‘lish")])
     if is_admin:
         rows.append([KeyboardButton(text="⚙️ ADMIN PANELI")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
@@ -401,19 +386,21 @@ async def registration_role(call: CallbackQuery, state: FSMContext):
         reply_markup=main_menu(role, await is_admin(call.from_user.id))
     )
     if role == "master":
-        await call.message.answer("Уста профилини тўлдириш учун «👨‍🔧 Уста бўлиш» тугмасини босинг.")
+        await call.message.answer(
+            "Уста сифатида қўшилиш учун «📩 Администраторга мурожаат» тугмасини босинг."
+        )
     await call.answer()
 
 
 # -------------------- УСТА БЎЛИШ ВА ҚИДИРИШ --------------------
-@dp.message(F.text == "👨‍🔧 Usta bo‘lish")
-async def master_apply(message: Message, state: FSMContext):
-    user = await get_user(message.from_user.id)
-    if not user:
-        await message.answer("Аввал /start орқали рўйхатдан ўтинг.")
-        return
-    await message.answer("Қайси хизмат тури бўйича ишлайсиз?", reply_markup=categories_markup("apply"))
-    await state.set_state(MasterApplication.category)
+@dp.message(F.text == "📩 Администраторга мурожаат")
+async def contact_admin(message: Message, state: FSMContext):
+    await state.set_state(SupportForm.message)
+    await message.answer(
+        "Уста бўлиб қўшилмоқчимисиз ёки саволингиз борми? "
+        "Хабарингизни ёзинг, администраторга етказамиз.\\n\\n"
+        "📞 Администратор: +998 77 069 00 03"
+    )
 
 
 @dp.callback_query(MasterApplication.category, F.data.startswith("apply:"))
@@ -967,7 +954,7 @@ async def help_guide(message: Message):
     await message.answer(
         "ℹ️ USTA 24 ANDIJON qoʻllanmasi\n\n"
         "👤 Mijoz: Buyurtma berish orqali xizmat turini tanlang, muammoni yozing, manzil va telefonni kiriting.\n"
-        "👨‍🔧 Usta: Usta bo‘lish orqali ariza yuboring. Admin tasdiqlagach, buyurtmalarni olasiz.\n"
+        "👨‍🔧 Уста бўлиб қўшилиш учун администраторга мурожаат қилинг: +998 77 069 00 03.\n"
         "💳 To‘lov: naqd yoki karta usulini tanlang.\n"
         "💬 Yordam: administratorga xabar yuboring.\n\n"
         "Jarayonni bekor qilish uchun /cancel buyrug‘ini yuboring."
