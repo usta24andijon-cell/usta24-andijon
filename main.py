@@ -1,3 +1,4 @@
+
 import asyncio
 import logging
 import os
@@ -315,7 +316,10 @@ async def start(message: Message, state: FSMContext):
         await user_menu(message, message.from_user.id)
         return
     await message.answer(
-        "🔧 <b>USTA 24 ANDIJON</b>\n\nРўйхатдан ўтиш учун исм-фамилиянгизни ёзинг.",
+        "<b>🔧 USTA 24 ANDIJON</b>\n"
+        "<b>ХИЗМАТЛАРИГА ХУШ КЕЛИБСИЗ!</b>\n\n"
+        "Сизга сифатли ва ишончли хизмат кўрсатишдан мамнунмиз!\n"
+        "Керакли хизматни танланг ва буюртма беринг.",
         parse_mode="HTML"
     )
     await state.set_state(Registration.name)
