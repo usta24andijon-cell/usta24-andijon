@@ -260,6 +260,8 @@ async def init_db():
             "payment_status": "TEXT NOT NULL DEFAULT 'unpaid'",
             "receipt_file_id": "TEXT",
             "created_at": "TEXT",
+            "latitude": "REAL",
+            "longitude": "REAL",
         }
         for column, definition in migrations.items():
             if column not in columns:
