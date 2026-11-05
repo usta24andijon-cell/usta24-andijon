@@ -10,7 +10,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
-    Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton,
+    Message, CallbackQuery, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton,
     InlineKeyboardMarkup, InlineKeyboardButton
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -822,6 +822,11 @@ async def complete_order(call: CallbackQuery):
     await call.message.edit_reply_markup(reply_markup=None)
     await bot.send_message(
         order["client_id"],
+        "🏠 Асосий менюга қайтиш учун /menu ни босишингиз мумкин.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    await bot.send_message(
+        order["client_id"],
         f"✅ #{order_id} буюртма якунланди. Устага 1 дан 5 гача баҳо беринг.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text=f"{n} ⭐", callback_data=f"rate:{order_id}:{n}") for n in range(1, 6)]
@@ -884,7 +889,10 @@ async def rate_order(call: CallbackQuery, state: FSMContext):
         "UPDATE masters SET rating=?, reviews=? WHERE tg_id=?",
         (stats["avg_rating"] or 0, stats["total"], order["master_id"])
     )
-    await call.message.answer("⭐ Раҳмат! Баҳонгиз сақланди.")
+    await call.message.answer(
+        "⭐ Раҳмат! Баҳонгиз сақланди.\n🏠 Асосий меню:",
+        reply_markup=main_menu("client", await is_admin(call.from_user.id))
+    )
     await call.answer()
 
 
