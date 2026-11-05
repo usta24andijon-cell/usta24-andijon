@@ -96,16 +96,39 @@ class BroadcastForm(StatesGroup):
 # -------------------- КЛАВИАТУРАЛАР --------------------
 def main_menu(role: str = "client", is_admin: bool = False):
     rows = [
-        [KeyboardButton(text="🔍 Уста топиш"), KeyboardButton(text="📝 Буюртма бериш")],
-        [KeyboardButton(text="👨‍🔧 Уста бўлиш"), KeyboardButton(text="📋 Буюртмаларим")],
-        [KeyboardButton(text="👤 Шахсий кабинет"), KeyboardButton(text="⭐ Баҳолар")],
-        [KeyboardButton(text="❤️ Севимли усталар"), KeyboardButton(text="☎️ Ёрдам")],
+        [KeyboardButton(text="🔎 Xizmat tanlash / Buyurtma berish")],
+        [KeyboardButton(text="📍 Joylashuv yuborish")],
+        [KeyboardButton(text="📋 Buyurtmalarim"),
+         KeyboardButton(text="🚚 Usta joylashuvini kuzatish")],
+        [KeyboardButton(text="❤️ Sevimli ustalarim"),
+         KeyboardButton(text="⭐ Baholar")],
+        [KeyboardButton(text="👤 Shaxsiy kabinet"),
+         KeyboardButton(text="💳 Toʻlovlarim")],
+        [KeyboardButton(text="💬 Yordam"),
+         KeyboardButton(text="ℹ️ Qoʻllanma")],
     ]
     if role == "master":
-        rows.insert(1, [KeyboardButton(text="📥 Усталар учун буюртмалар")])
+        rows = [
+            [KeyboardButton(text="👨‍🔧 USTA KABINETI")],
+            [KeyboardButton(text="📍 Joylashuvimni yuborish")],
+            [KeyboardButton(text="📥 Yangi buyurtmalar"),
+             KeyboardButton(text="📌 Qabul qilgan buyurtmalarim")],
+            [KeyboardButton(text="🔄 Jarayondagi ishlarim"),
+             KeyboardButton(text="✅ Tugallangan ishlarim")],
+            [KeyboardButton(text="⭐ Mening reytingim"),
+             KeyboardButton(text="💰 Daromadlarim")],
+            [KeyboardButton(text="📊 Ish faoliyatim"),
+             KeyboardButton(text="👤 Profilim")],
+            [KeyboardButton(text="✏️ Ma’lumotlarni tahrirlash")],
+            [KeyboardButton(text="💬 Yordam"),
+             KeyboardButton(text="⬅️ Asosiy menyu")],
+        ]
+    else:
+        rows.append([KeyboardButton(text="👨‍🔧 Usta bo‘lish")])
     if is_admin:
-        rows.append([KeyboardButton(text="⚙️ Админ панели")])
+        rows.append([KeyboardButton(text="⚙️ ADMIN PANELI")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
 
 
 def categories_markup(prefix: str):
@@ -366,7 +389,7 @@ async def registration_role(call: CallbackQuery, state: FSMContext):
 
 
 # -------------------- УСТА БЎЛИШ ВА ҚИДИРИШ --------------------
-@dp.message(F.text == "👨‍🔧 Уста бўлиш")
+@dp.message(F.text == "👨‍🔧 Usta bo‘lish")
 async def master_apply(message: Message, state: FSMContext):
     user = await get_user(message.from_user.id)
     if not user:
@@ -432,7 +455,7 @@ async def master_about(message: Message, state: FSMContext):
     )
 
 
-@dp.message(F.text == "🔍 Уста топиш")
+@dp.message(F.text == "🔍 Usta topish (old)")
 async def find_master(message: Message):
     await message.answer("Қайси хизмат керак?", reply_markup=categories_markup("find"))
 
@@ -481,7 +504,7 @@ async def favorite_add(call: CallbackQuery):
     await call.answer("Севимли усталарга қўшилди.")
 
 
-@dp.message(F.text == "❤️ Севимли усталар")
+@dp.message(F.text == "❤️ Sevimli ustalar")
 async def favorites_list(message: Message):
     rows = await db_fetchall(
         """SELECT m.*,u.name,u.phone,u.district FROM favorites f
@@ -500,7 +523,7 @@ async def favorites_list(message: Message):
 
 
 # -------------------- БУЮРТМА БЕРИШ --------------------
-@dp.message(F.text == "📝 Буюртма бериш")
+@dp.message(F.text.in_({"🔎 Xizmat tanlash / Buyurtma berish", "📝 Buyurtma berish", "🔍 Usta topish"}))
 async def order_start(message: Message, state: FSMContext):
     if not await get_user(message.from_user.id):
         await message.answer("Аввал /start орқали рўйхатдан ўтинг.")
@@ -608,13 +631,14 @@ async def create_order(message: Message, state: FSMContext, payment_method: str,
         cursor = await db.execute(
             """INSERT INTO orders(
                 client_id,category,description,address,phone,photo_id,status,
-                payment_method,payment_status,receipt_file_id,created_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                payment_method,payment_status,receipt_file_id,created_at,latitude,longitude
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 message.from_user.id, data["category"], data["description"],
                 data["address"], data["phone"], data.get("photo_id"),
                 status, payment_method, payment_status, receipt_id,
-                datetime.now().isoformat(timespec="seconds")
+                datetime.now().isoformat(timespec="seconds"),
+                data.get("latitude"), data.get("longitude")
             )
         )
         order_id = cursor.lastrowid
@@ -645,11 +669,12 @@ async def order_cash(call: CallbackQuery, state: FSMContext):
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """INSERT INTO orders(client_id,category,description,address,phone,photo_id,
-               status,payment_method,payment_status,created_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?)""",
+               status,payment_method,payment_status,created_at,latitude,longitude)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
             (call.from_user.id, data["category"], data["description"], data["address"],
              data["phone"], data.get("photo_id"), "new", "cash", "unpaid",
-             datetime.now().isoformat(timespec="seconds"))
+             datetime.now().isoformat(timespec="seconds"),
+             data.get("latitude"), data.get("longitude"))
         )
         order_id = cursor.lastrowid
         await db.commit()
@@ -679,7 +704,7 @@ async def order_card(call: CallbackQuery, state: FSMContext):
 
 
 # -------------------- УСТА БУЮРТМАЛАРИ --------------------
-@dp.message(F.text == "📥 Усталар учун буюртмалар")
+@dp.message(F.text.in_({"📥 Yangi buyurtmalar", "📌 Qabul qilgan буюртмаларим"}))
 async def master_orders(message: Message):
     master = await db_fetchone("SELECT * FROM masters WHERE tg_id=?", (message.from_user.id,))
     if not master or not master["approved"]:
@@ -754,6 +779,11 @@ async def take_order(call: CallbackQuery):
         order["client_id"],
         f"👨‍🔧 Буюртмангиз қабул қилинди!\nУста: {master_user['name']}\nТелефон: {master_user['phone']}"
     )
+    await bot.send_message(
+        order["client_id"],
+        "📍 Устанинг жойлашувини кўриш учун «🚚 Usta joylashuvini kuzatish» тугмасини босинг. "
+        "Уста жойлашувини ўзи ихтиёрий равишда юборганида кўринади."
+    )
     await call.answer("Буюртма сизга бириктирилди.")
 
 
@@ -784,7 +814,7 @@ async def complete_order(call: CallbackQuery):
 
 
 # -------------------- МИЖОЗ БУЮРТМАЛАРИ ВА БАҲОЛАР --------------------
-@dp.message(F.text == "📋 Буюртмаларим")
+@dp.message(F.text == "📋 Buyurtmalarim")
 async def my_orders(message: Message):
     orders = await db_fetchall(
         "SELECT * FROM orders WHERE client_id=? ORDER BY id DESC LIMIT 20",
@@ -841,7 +871,7 @@ async def rate_order(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-@dp.message(F.text == "⭐ Баҳолар")
+@dp.message(F.text == "⭐ Baholar")
 async def reviews_list(message: Message):
     rows = await db_fetchall(
         """SELECT r.rating,r.comment,u.name,m.category
@@ -859,7 +889,7 @@ async def reviews_list(message: Message):
 
 
 # -------------------- ЁРДАМ ВА КАБИНЕТ --------------------
-@dp.message(F.text == "👤 Шахсий кабинет")
+@dp.message(F.text == "👤 Shaxsiy kabinet")
 async def profile(message: Message):
     user = await get_user(message.from_user.id)
     if not user:
@@ -875,7 +905,7 @@ async def profile(message: Message):
     await message.answer(text)
 
 
-@dp.message(F.text == "☎️ Ёрдам")
+@dp.message(F.text == "💬 Yordam")
 async def support_start(message: Message, state: FSMContext):
     await message.answer("Администраторга хабарингизни ёзинг.")
     await state.set_state(SupportForm.message)
@@ -905,8 +935,255 @@ async def cancel(message: Message, state: FSMContext):
                          reply_markup=main_menu(role, await is_admin(message.from_user.id)))
 
 
+
+# -------------------- QO'SHIMCHA PRO MENYULAR --------------------
+@dp.message(F.text == "ℹ️ Qoʻllanma")
+async def help_guide(message: Message):
+    await message.answer(
+        "ℹ️ USTA 24 ANDIJON qoʻllanmasi\n\n"
+        "👤 Mijoz: Buyurtma berish orqali xizmat turini tanlang, muammoni yozing, manzil va telefonni kiriting.\n"
+        "👨‍🔧 Usta: Usta bo‘lish orqali ariza yuboring. Admin tasdiqlagach, buyurtmalarni olasiz.\n"
+        "💳 To‘lov: naqd yoki karta usulini tanlang.\n"
+        "💬 Yordam: administratorga xabar yuboring.\n\n"
+        "Jarayonni bekor qilish uchun /cancel buyrug‘ini yuboring."
+    )
+
+
+@dp.message(F.text.in_({"🛠 Mening ишlarим", "🔄 Jarayondagi ishlarim", "📌 Qabul qilgan buyurtmalarim", "✅ Tugallangan ishlarim"}))
+async def master_my_jobs(message: Message):
+    rows = await db_fetchall(
+        "SELECT * FROM orders WHERE master_id=? ORDER BY id DESC LIMIT 30",
+        (message.from_user.id,)
+    )
+    if not rows:
+        await message.answer("Sizga hali buyurtma biriktirilmagan.")
+        return
+    for row in rows:
+        await message.answer(
+            f"🛠 Buyurtma №{row['id']}\nXizmat: {row['category']}\n"
+            f"Holati: {row['status']}\nManzil: {row['address']}\nTelefon: {row['phone']}"
+        )
+
+
+@dp.message(F.text == "📈 Usta statistikasi")
+async def master_statistics(message: Message):
+    master = await db_fetchone("SELECT * FROM masters WHERE tg_id=?", (message.from_user.id,))
+    if not master:
+        await message.answer("Avval usta sifatida ariza yuboring.")
+        return
+    counts = await db_fetchone(
+        """SELECT SUM(CASE WHEN status='accepted' THEN 1 ELSE 0 END) AS active,
+                  SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed,
+                  COUNT(*) AS total FROM orders WHERE master_id=?""",
+        (message.from_user.id,)
+    )
+    await message.answer(
+        "📈 Usta statistikasi\n"
+        f"Reyting: {master['rating']:.1f}/5\nBaholar: {master['reviews']}\n"
+        f"Jami buyurtmalar: {counts['total'] or 0}\n"
+        f"Faol ishlar: {counts['active'] or 0}\n"
+        f"Bajarilgan ishlar: {counts['completed'] or 0}\n"
+        f"Tasdiqlangan: {'Ha' if master['approved'] else 'Kutilmoqda'}"
+    )
+
+
+@dp.message(F.text == "✏️ Usta profilim")
+async def master_profile_shortcut(message: Message):
+    master = await db_fetchone("SELECT * FROM masters WHERE tg_id=?", (message.from_user.id,))
+    user = await get_user(message.from_user.id)
+    if not master or not user:
+        await message.answer("Usta profilingiz topilmadi. Usta bo‘lish bo‘limidan ariza yuboring.")
+        return
+    await message.answer(
+        "✏️ Usta profilingiz\n"
+        f"Ism: {user['name']}\nTelefon: {user['phone']}\nHudud: {master['district']}\n"
+        f"Yo‘nalish: {master['category']}\nTajriba: {master['experience']}\n"
+        f"Ma’lumot: {master['about']}\n"
+        f"Holat: {'Tasdiqlangan' if master['approved'] else 'Tasdiqlash kutilmoqda'}"
+    )
+
+
+@dp.message(F.text == "💳 Toʻlovlarim")
+async def my_payments(message: Message):
+    rows = await db_fetchall(
+        "SELECT id,payment_method,payment_status,status FROM orders WHERE client_id=? ORDER BY id DESC LIMIT 20",
+        (message.from_user.id,)
+    )
+    if not rows:
+        await message.answer("Hozircha to‘lovlar tarixi mavjud emas.")
+        return
+    for row in rows:
+        method = "Naqd" if row['payment_method'] == 'cash' else "Karta"
+        await message.answer(
+            f"💳 Buyurtma №{row['id']}\nTo‘lov turi: {method}\n"
+            f"To‘lov holati: {row['payment_status']}\nBuyurtma holati: {row['status']}"
+        )
+
+
+@dp.message(Command("menu"))
+async def show_main_menu(message: Message, state: FSMContext):
+    await state.clear()
+    user = await get_user(message.from_user.id)
+    role = user["role"] if user else "client"
+    await message.answer("🏠 Asosiy menyu", reply_markup=main_menu(role, await is_admin(message.from_user.id)))
+
+
+
+# -------------------- JOYLASHUV VA USTA KABINETI --------------------
+@dp.message(F.text == "📍 Joylashuv yuborish")
+async def client_share_location(message: Message):
+    await message.answer(
+        "📍 Жойлашувингизни юбориш учун тугмани босинг.",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="📍 Жойлашувни юбориш", request_location=True)]],
+            resize_keyboard=True, one_time_keyboard=True
+        )
+    )
+
+
+@dp.message(F.text == "📍 Joylashuvimni yuborish")
+async def master_share_location_prompt(message: Message):
+    master = await db_fetchone("SELECT approved FROM masters WHERE tg_id=?", (message.from_user.id,))
+    if not master or not master["approved"]:
+        await message.answer("Бу функция фақат администратор тасдиқлаган усталар учун.")
+        return
+    await message.answer(
+        "📍 Жойлашувингизни юборинг. Бу жойлашув сизга бириктирилган буюртма мижозига кўрсатилади.",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="📍 Жойлашувни юбориш", request_location=True)]],
+            resize_keyboard=True, one_time_keyboard=True
+        )
+    )
+
+
+@dp.message(F.location)
+async def save_shared_location(message: Message):
+    master = await db_fetchone("SELECT approved FROM masters WHERE tg_id=?", (message.from_user.id,))
+    if not master or not master["approved"]:
+        return
+    loc = message.location
+    await db_execute(
+        """INSERT INTO master_locations(master_id,latitude,longitude,updated_at)
+           VALUES(?,?,?,?)
+           ON CONFLICT(master_id) DO UPDATE SET
+           latitude=excluded.latitude, longitude=excluded.longitude,
+           updated_at=excluded.updated_at""",
+        (message.from_user.id, loc.latitude, loc.longitude,
+         datetime.now().isoformat(timespec="seconds"))
+    )
+    active = await db_fetchall(
+        "SELECT client_id,id FROM orders WHERE master_id=? AND status='accepted'",
+        (message.from_user.id,)
+    )
+    for order in active:
+        try:
+            await bot.send_location(order["client_id"], loc.latitude, loc.longitude)
+            await bot.send_message(order["client_id"], f"📍 Устангиз #{order['id']} буюртма бўйича жойлашувини янгилади.")
+        except Exception:
+            logger.exception("Мижозга уста жойлашуви юборилмади")
+    await message.answer("✅ Жойлашувингиз сақланди ва фаол буюртмаларингиз мижозларига юборилди.")
+
+
+@dp.message(F.text == "🚚 Usta joylashuvini kuzatish")
+async def client_track_master(message: Message):
+    orders = await db_fetchall(
+        """SELECT id,master_id FROM orders
+           WHERE client_id=? AND status='accepted' AND master_id IS NOT NULL
+           ORDER BY id DESC""",
+        (message.from_user.id,)
+    )
+    if not orders:
+        await message.answer("Ҳозирча қабул қилинган фаол буюртмангиз йўқ.")
+        return
+    sent = False
+    for order in orders:
+        location = await db_fetchone(
+            "SELECT latitude,longitude,updated_at FROM master_locations WHERE master_id=?",
+            (order["master_id"],)
+        )
+        if location:
+            await message.answer(f"📍 #{order['id']} буюртма бўйича устанинг охирги юборган жойлашуви:")
+            await message.answer_location(location["latitude"], location["longitude"])
+            await message.answer(f"Охирги янгиланиш: {location['updated_at']}")
+            sent = True
+        else:
+            await message.answer(f"#{order['id']} буюртма устаси ҳали жойлашувини юбормади.")
+    if not sent:
+        await message.answer("Уста жойлашувини юборганидан кейин шу бўлимда кўринади.")
+
+
+@dp.message(F.text == "👨‍🔧 USTA KABINETI")
+async def master_cabinet_home(message: Message):
+    master = await db_fetchone("SELECT * FROM masters WHERE tg_id=?", (message.from_user.id,))
+    if not master or not master["approved"]:
+        await message.answer("Уста кабинети фақат тасдиқланган усталар учун. Аризангиз администратор тасдиғини кутмоқда.")
+        return
+    await message.answer("👨‍🔧 Уста кабинети. Керакли бўлимни танланг.",
+                         reply_markup=main_menu("master", await is_admin(message.from_user.id)))
+
+
+@dp.message(F.text == "⬅️ Asosiy menyu")
+async def master_back_to_main(message: Message):
+    user = await get_user(message.from_user.id)
+    role = user["role"] if user else "client"
+    await message.answer("🏠 Асосий меню", reply_markup=main_menu(role, await is_admin(message.from_user.id)))
+
+
+@dp.message(F.text == "📌 Qabul qilgan buyurtmalarim")
+async def master_accepted_orders(message: Message):
+    master = await db_fetchone("SELECT * FROM masters WHERE tg_id=? AND approved=1", (message.from_user.id,))
+    if not master:
+        await message.answer("Бу бўлим фақат тасдиқланган усталар учун.")
+        return
+    rows = await db_fetchall(
+        "SELECT * FROM orders WHERE master_id=? AND status='accepted' ORDER BY id DESC",
+        (message.from_user.id,)
+    )
+    if not rows:
+        await message.answer("Қабул қилинган буюртмаларингиз йўқ.")
+        return
+    for row in rows:
+        await message.answer(f"📌 Буюртма #{row['id']}\\n{row['category']}\\n{row['description']}\\nМанзил: {row['address']}")
+
+
+@dp.message(F.text == "🔄 Jarayondagi ishlarim")
+async def master_active_jobs(message: Message):
+    await master_accepted_orders(message)
+
+
+@dp.message(F.text == "✅ Tugallangan ishlarim")
+async def master_completed_jobs(message: Message):
+    rows = await db_fetchall(
+        "SELECT * FROM orders WHERE master_id=? AND status='completed' ORDER BY id DESC LIMIT 20",
+        (message.from_user.id,)
+    )
+    if not rows:
+        await message.answer("Ҳали тугалланган ишларингиз йўқ.")
+        return
+    for row in rows:
+        await message.answer(f"✅ Буюртма #{row['id']}\\n{row['category']}\\n{row['description']}")
+
+
+@dp.message(F.text == "⭐ Mening reytingim")
+async def master_my_rating(message: Message):
+    master = await db_fetchone("SELECT rating,reviews,approved FROM masters WHERE tg_id=?", (message.from_user.id,))
+    if not master:
+        await message.answer("Уста профилингиз топилмади.")
+        return
+    await message.answer(f"⭐ Рейтинг: {master['rating']:.1f}/5\\nБаҳолар: {master['reviews']}\\nТасдиқ: {'Ҳа' if master['approved'] else 'Кутилмоқда'}")
+
+
+@dp.message(F.text == "💰 Daromadlarim")
+async def master_income(message: Message):
+    count = await db_fetchone(
+        "SELECT COUNT(*) AS total FROM orders WHERE master_id=? AND status='completed'",
+        (message.from_user.id,)
+    )
+    await message.answer(f"💰 Тугалланган ишлар: {count['total'] or 0} та. Даромад суммаси ҳозирча ботда ҳисобланмайди.")
+
+
 # -------------------- АДМИН ПАНЕЛИ --------------------
-@dp.message(F.text == "⚙️ Админ панели")
+@dp.message(F.text.in_({"⚙️ ADMIN PANELI", "⚙️ Admin paneli"}))
 async def admin_panel(message: Message):
     if not await is_admin(message.from_user.id):
         await message.answer("Бу бўлим фақат администратор учун.")
