@@ -1,4 +1,3 @@
-
 import asyncio
 import logging
 import os
@@ -311,6 +310,20 @@ async def send_order_to_masters(order_id: int):
 @dp.message(CommandStart())
 async def start(message: Message, state: FSMContext):
     await state.clear()
+
+    # Администратор рўйхатдан ўтиш жараёнига кирмасин.
+    # ADMIN_IDS даги админ учун телефон/туман сўралмайди.
+    if await is_admin(message.from_user.id):
+        await message.answer(
+            "<b>🔧 USTA 24 ANDIJON</b>\\n"
+            "<b>АДМИНИСТРАТОР ПАНЕЛИГА ХУШ КЕЛИБСИЗ!</b>\\n\\n"
+            "Керакли бошқарув бўлимини танланг.",
+            parse_mode="HTML",
+            reply_markup=main_menu("admin", True)
+        )
+        await message.answer("⚙️ Администратор панели", reply_markup=admin_markup())
+        return
+
     user = await get_user(message.from_user.id)
     if user:
         await user_menu(message, message.from_user.id)
